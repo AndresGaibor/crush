@@ -31,7 +31,10 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	compactpkg "github.com/charmbracelet/crush/internal/personal/compact"
+	"github.com/charmbracelet/crush/internal/personal/hooks"
 	"github.com/charmbracelet/crush/internal/personal/memory"
+	pluginspkg "github.com/charmbracelet/crush/internal/personal/plugins"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -112,6 +115,42 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 	go func() {
 		if _, err := memory.Init(store.WorkingDir()); err != nil {
 			slog.Warn("Failed to initialize memory system", "error", err)
+		}
+	}()
+
+	// Initialize compact system.
+	compactpkg.Init(store.WorkingDir())
+
+	// Initialize hooks system
+	go func() {
+		hooksConfig, err := hooks.LoadFromBytes(cfg.Hooks)
+		if err != nil {
+			slog.Warn("Failed to load hooks config", "error", err)
+			hooksConfig = make(hooks.HookConfigMap)
+		}
+		hooks.Init(store.WorkingDir(), hooksConfig)
+	}()
+
+	// Initialize plugins system
+	go func() {
+		pluginsMgr, err := pluginspkg.Init(store.WorkingDir())
+		if err != nil {
+			slog.Warn("Failed to initialize plugin system", "error", err)
+			return
+		}
+
+		// Register hooks de plugins en el HookManager
+		if pluginsMgr != nil && hooks.IsInitialized() {
+			pluginspkg.RegisterPluginHooks(
+				pluginsMgr.Registry,
+				hooks.GetManager(),
+			)
+		}
+
+		// Agregar skill paths de plugins al config
+		if pluginsMgr != nil {
+			pluginSkillPaths := pluginspkg.GetPluginSkillPaths(pluginsMgr.Registry.GetSkills())
+			cfg.Options.SkillsPaths = append(cfg.Options.SkillsPaths, pluginSkillPaths...)
 		}
 	}()
 

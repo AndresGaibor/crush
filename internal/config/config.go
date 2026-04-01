@@ -3,6 +3,7 @@ package config
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 	"github.com/charmbracelet/crush/internal/env"
 	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	"github.com/charmbracelet/crush/internal/personal/compact"
 	"github.com/invopop/jsonschema"
 )
 
@@ -257,6 +259,7 @@ type Options struct {
 	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	DisableNotifications      bool         `json:"disable_notifications,omitempty" jsonschema:"description=Disable desktop notifications,default=false"`
+	Compact                   *compact.CompactConfig `json:"compact,omitempty" jsonschema:"description=Context compression settings"`
 }
 
 type MCPs map[string]MCPConfig
@@ -393,6 +396,10 @@ type Config struct {
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Agents map[string]Agent `json:"-"`
+
+	Hooks json.RawMessage `json:"hooks,omitempty"`
+
+	Plugins json.RawMessage `json:"plugins,omitempty"`
 }
 
 func (c *Config) EnabledProviders() []ProviderConfig {

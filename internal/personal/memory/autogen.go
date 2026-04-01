@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -46,12 +47,13 @@ func (d *PatternDetector) CheckSuggestions() []SuggestedMemory {
 	defer d.mu.Unlock()
 
 	var suggestions []SuggestedMemory
-	for pattern, count := range d.correcciones {
+	for key, count := range d.correcciones {
 		if count >= d.minFrequency {
+			category, pattern := splitPatternKey(key)
 			suggestions = append(suggestions, SuggestedMemory{
 				Pattern:  pattern,
 				Count:    count,
-				Category: extractCategory(pattern),
+				Category: category,
 			})
 		}
 	}
@@ -76,11 +78,11 @@ func normalizePattern(category, pattern string) string {
 	return strings.ToLower(category + ":" + strings.TrimSpace(pattern))
 }
 
-func extractCategory(key string) string {
+func splitPatternKey(key string) (string, string) {
 	if idx := strings.Index(key, ":"); idx >= 0 {
-		return key[:idx]
+		return key[:idx], key[idx+1:]
 	}
-	return "unknown"
+	return "unknown", key
 }
 
 // GenerateMemoryContent genera el contenido Markdown para una memoria sugerida.
@@ -95,9 +97,7 @@ func GenerateMemoryContent(suggestion SuggestedMemory) string {
 	sb.WriteString("# ")
 	sb.WriteString(capitalizeFirst(suggestion.Category))
 	sb.WriteString("\n\n")
-	sb.WriteString("Patrón detectado automáticamente (")
-	sb.WriteString(strings.Repeat("*", suggestion.Count))
-	sb.WriteString(" ocurrencias):\n\n")
+	sb.WriteString(fmt.Sprintf("Patrón detectado automáticamente (%d ocurrencias):\n\n", suggestion.Count))
 	sb.WriteString(suggestion.Pattern)
 	sb.WriteString("\n\n")
 	sb.WriteString("## Instrucciones\n\n")

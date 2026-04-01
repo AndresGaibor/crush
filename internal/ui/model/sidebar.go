@@ -3,12 +3,17 @@ package model
 import (
 	"cmp"
 	"fmt"
+	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/crush/internal/personal/memory"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
+	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // modelInfo renders the current model information including reasoning
@@ -48,54 +53,193 @@ func (m *UI) modelInfo(width int) string {
 			ModelContext: model.CatwalkCfg.ContextWindow,
 		}
 	}
-	return common.ModelInfo(m.com.Styles, model.CatwalkCfg.Name, providerName, reasoningInfo, modelContext, width)
+	modelName := ""
+	if model != nil {
+		modelName = model.CatwalkCfg.Name
+	}
+	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width)
 }
 
-// getDynamicHeightLimits will give us the num of items to show in each section based on the hight
-// some items are more important than others.
-func getDynamicHeightLimits(availableHeight int) (maxFiles, maxLSPs, maxMCPs int) {
+// getDynamicHeightLimits returns the number of visible items for each sidebar
+// section while preserving the priority order.
+func getDynamicHeightLimits(availableHeight int) (maxFiles, maxMemories, maxLSPs, maxMCPs int) {
 	const (
-		minItemsPerSection      = 2
-		defaultMaxFilesShown    = 10
-		defaultMaxLSPsShown     = 8
-		defaultMaxMCPsShown     = 8
-		minAvailableHeightLimit = 10
+		minItemsPerSection   = 1
+		defaultMaxFilesShown = 10
+		defaultMaxMemories   = 4
+		defaultMaxLSPsShown  = 8
+		defaultMaxMCPsShown  = 8
 	)
 
-	// If we have very little space, use minimum values
-	if availableHeight < minAvailableHeightLimit {
-		return minItemsPerSection, minItemsPerSection, minItemsPerSection
+	if availableHeight <= 0 {
+		return minItemsPerSection, minItemsPerSection, minItemsPerSection, minItemsPerSection
 	}
 
-	// Distribute available height among the three sections
-	// Give priority to files, then LSPs, then MCPs
-	totalSections := 3
-	heightPerSection := availableHeight / totalSections
+	if availableHeight <= 4 {
+		return minItemsPerSection, minItemsPerSection, minItemsPerSection, minItemsPerSection
+	}
 
-	// Calculate limits for each section, ensuring minimums
-	maxFiles = max(minItemsPerSection, min(defaultMaxFilesShown, heightPerSection))
-	maxLSPs = max(minItemsPerSection, min(defaultMaxLSPsShown, heightPerSection))
-	maxMCPs = max(minItemsPerSection, min(defaultMaxMCPsShown, heightPerSection))
+	maxFiles = minItemsPerSection
+	maxMemories = minItemsPerSection
+	maxLSPs = minItemsPerSection
+	maxMCPs = minItemsPerSection
 
-	// If we have extra space, give it to files first
-	remainingHeight := availableHeight - (maxFiles + maxLSPs + maxMCPs)
-	if remainingHeight > 0 {
-		extraForFiles := min(remainingHeight, defaultMaxFilesShown-maxFiles)
-		maxFiles += extraForFiles
-		remainingHeight -= extraForFiles
+	remainingHeight := availableHeight - 4
+	if remainingHeight <= 0 {
+		return maxFiles, maxMemories, maxLSPs, maxMCPs
+	}
 
-		if remainingHeight > 0 {
-			extraForLSPs := min(remainingHeight, defaultMaxLSPsShown-maxLSPs)
-			maxLSPs += extraForLSPs
-			remainingHeight -= extraForLSPs
+	addExtra := func(current, cap int) (int, int) {
+		if remainingHeight <= 0 || current >= cap {
+			return current, remainingHeight
+		}
+		extra := min(remainingHeight, cap-current)
+		current += extra
+		remainingHeight -= extra
+		return current, remainingHeight
+	}
 
-			if remainingHeight > 0 {
-				maxMCPs += min(remainingHeight, defaultMaxMCPsShown-maxMCPs)
-			}
+	maxFiles, _ = addExtra(maxFiles, defaultMaxFilesShown)
+	maxMemories, _ = addExtra(maxMemories, defaultMaxMemories)
+	maxLSPs, _ = addExtra(maxLSPs, defaultMaxLSPsShown)
+	maxMCPs, _ = addExtra(maxMCPs, defaultMaxMCPsShown)
+
+	return maxFiles, maxMemories, maxLSPs, maxMCPs
+}
+
+type memoryDensity int
+
+const (
+	memoryDensityCompact memoryDensity = iota
+	memoryDensityMedium
+	memoryDensityLarge
+)
+
+func memoryRenderDensity(width, maxItems int) memoryDensity {
+	switch {
+	case width < 34 || maxItems <= 1:
+		return memoryDensityCompact
+	case width < 54 || maxItems <= 2:
+		return memoryDensityMedium
+	default:
+		return memoryDensityLarge
+	}
+}
+
+func memorySummaryLine(stats memory.MemoryStats, width int) string {
+	line := fmt.Sprintf("T:%d P:%d G:%d S:%d", stats.Total, stats.Project, stats.Global, stats.Stale)
+	return ansi.Truncate(line, width, "…")
+}
+
+func memoryTagsPreview(tags []string, density memoryDensity) string {
+	if len(tags) == 0 {
+		return ""
+	}
+
+	limit := 0
+	switch density {
+	case memoryDensityMedium:
+		limit = 2
+	case memoryDensityLarge:
+		limit = 3
+	default:
+		return ""
+	}
+
+	if len(tags) < limit {
+		limit = len(tags)
+	}
+
+	preview := strings.Join(tags[:limit], ", ")
+	if remaining := len(tags) - limit; remaining > 0 {
+		preview = fmt.Sprintf("%s, +%d", preview, remaining)
+	}
+	return preview
+}
+
+func memoryEntryBlock(t *styles.Styles, mem memory.Memory, width int, density memoryDensity) []string {
+	scope := "P"
+	if mem.Scope == memory.ScopeGlobal {
+		scope = "G"
+	}
+
+	icon := t.Base.Foreground(t.Primary).Render(fmt.Sprintf("[%s]", scope))
+	title := ansi.Truncate(mem.ID, max(1, width-lipgloss.Width(icon)-1), "…")
+
+	if density == memoryDensityCompact {
+		return []string{common.Status(t, common.StatusOpts{
+			Icon:       icon,
+			Title:      title,
+			TitleColor: t.Primary,
+		}, width)}
+	}
+
+	tags := memoryTagsPreview(mem.Tags, density)
+	lines := []string{common.Status(t, common.StatusOpts{
+		Icon:       icon,
+		Title:      title,
+		TitleColor: t.Primary,
+	}, width)}
+	if tags != "" {
+		indent := "    "
+		tagsLine := ansi.Truncate(tags, max(1, width-lipgloss.Width(indent)), "…")
+		lines = append(lines, t.Subtle.Render(indent+tagsLine))
+	}
+	return lines
+}
+
+func buildMemorySectionBody(t *styles.Styles, width int, maxItems int, stats memory.MemoryStats, recent []memory.Memory) []string {
+	density := memoryRenderDensity(width, maxItems)
+	visibleRecent := recent
+	switch density {
+	case memoryDensityCompact:
+		if len(visibleRecent) > 1 {
+			visibleRecent = visibleRecent[:1]
+		}
+	case memoryDensityMedium:
+		if len(visibleRecent) > 2 {
+			visibleRecent = visibleRecent[:2]
+		}
+	default:
+		if len(visibleRecent) > 4 {
+			visibleRecent = visibleRecent[:4]
 		}
 	}
 
-	return maxFiles, maxLSPs, maxMCPs
+	lines := make([]string, 0, maxItems+2)
+
+	if len(visibleRecent) == 0 {
+		lines = append(lines, t.Muted.Render("No memories yet"))
+		return lines
+	}
+
+	for _, mem := range visibleRecent {
+		lines = append(lines, memoryEntryBlock(t, mem, width, density)...)
+	}
+
+	return lines
+}
+
+func (m *UI) memoryInfo(width int, maxItems int) string {
+	t := m.com.Styles
+	mgr := memory.GetManager()
+	title := common.Section(t, "Memory", width)
+	if mgr == nil {
+		return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n%s", title, t.Muted.Render("Memory not initialized")))
+	}
+
+	stats := memory.NewAger(mgr, 90*24*time.Hour, false).Stats()
+	recent, err := mgr.Recent(maxItems)
+	if err != nil {
+		return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n%s", title, t.Muted.Render("Memory unavailable")))
+	}
+
+	body := buildMemorySectionBody(t, width, maxItems, stats, recent)
+	lines := make([]string, 0, len(body)+1)
+	lines = append(lines, common.Section(t, "Memory", width, t.Subtle.Render(memorySummaryLine(stats, width))))
+	lines = append(lines, body...)
+
+	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
 }
 
 // sidebar renders the chat sidebar containing session title, working
@@ -134,8 +278,12 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 
 	_, remainingHeightArea := layout.SplitVertical(m.layout.sidebar, layout.Fixed(lipgloss.Height(sidebarHeader)))
 	remainingHeight := remainingHeightArea.Dy() - 10
-	maxFiles, maxLSPs, maxMCPs := getDynamicHeightLimits(remainingHeight)
+	if remainingHeight < 0 {
+		remainingHeight = 0
+	}
+	maxFiles, maxMemories, maxLSPs, maxMCPs := getDynamicHeightLimits(remainingHeight)
 
+	memorySection := m.memoryInfo(width, maxMemories)
 	lspSection := m.lspInfo(width, maxLSPs, true)
 	mcpSection := m.mcpInfo(width, maxMCPs, true)
 	filesSection := m.filesInfo(m.com.Store().WorkingDir(), width, maxFiles, true)
@@ -148,6 +296,8 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 				lipgloss.JoinVertical(
 					lipgloss.Left,
 					sidebarHeader,
+					memorySection,
+					"",
 					filesSection,
 					"",
 					lspSection,

@@ -116,3 +116,18 @@ func TestHandleTextareaHeightChange_FollowModeStaysAtBottom(t *testing.T) {
 		t.Fatal("expected chat to remain at bottom after editor resize in follow mode")
 	}
 }
+
+func TestGetDynamicHeightLimitsReservesSpaceForMemory(t *testing.T) {
+	t.Parallel()
+
+	files, memories, lsps, mcps := getDynamicHeightLimits(40)
+	if files <= 0 || memories <= 0 || lsps <= 0 || mcps <= 0 {
+		t.Fatalf("expected positive section limits, got files=%d memories=%d lsps=%d mcps=%d", files, memories, lsps, mcps)
+	}
+	if files <= memories {
+		t.Fatalf("expected files to receive more space than memory, got files=%d memories=%d", files, memories)
+	}
+	if memories > 4 {
+		t.Fatalf("expected memory section to stay bounded, got %d", memories)
+	}
+}

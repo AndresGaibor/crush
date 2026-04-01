@@ -44,6 +44,28 @@ type ContextFile struct {
 	Content string
 }
 
+func contextFileKey(path string) string {
+	return strings.ToLower(filepath.Clean(path))
+}
+
+func appendUniqueContextFiles(dst []ContextFile, seen map[string]struct{}, src []ContextFile) ([]ContextFile, map[string]struct{}) {
+	if seen == nil {
+		seen = make(map[string]struct{}, len(dst)+len(src))
+		for _, file := range dst {
+			seen[contextFileKey(file.Path)] = struct{}{}
+		}
+	}
+	for _, file := range src {
+		key := contextFileKey(file.Path)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		dst = append(dst, file)
+	}
+	return dst, seen
+}
+
 type Option func(*Prompt)
 
 func WithTimeFunc(fn func() time.Time) Option {
@@ -151,28 +173,21 @@ func expandPath(path string, store *config.ConfigStore) string {
 func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
 	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
 	platform := cmp.Or(p.platform, runtime.GOOS)
-
-	files := map[string][]ContextFile{}
+	var contextFiles []ContextFile
+	var seen map[string]struct{}
 
 	cfg := store.Config()
 	for _, pth := range cfg.Options.ContextPaths {
 		expanded := expandPath(pth, store)
-		pathKey := strings.ToLower(expanded)
-		if _, ok := files[pathKey]; ok {
-			continue
-		}
 		content := processContextPath(expanded, store)
-		files[pathKey] = content
+		contextFiles, seen = appendUniqueContextFiles(contextFiles, seen, content)
 	}
 
 	// Inject .crush/memory/ directory if it exists
 	memoryPath := filepath.Join(store.WorkingDir(), ".crush", "memory")
-	memoryPathKey := strings.ToLower(memoryPath)
-	if _, ok := files[memoryPathKey]; !ok {
-		if info, err := os.Stat(memoryPath); err == nil && info.IsDir() {
-			content := processContextPath(memoryPath, store)
-			files[memoryPathKey] = content
-		}
+	if info, err := os.Stat(memoryPath); err == nil && info.IsDir() {
+		content := processContextPath(memoryPath, store)
+		contextFiles, seen = appendUniqueContextFiles(contextFiles, seen, content)
 	}
 
 	// Discover and load skills metadata.
@@ -206,9 +221,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		}
 	}
 
-	for _, contextFiles := range files {
-		data.ContextFiles = append(data.ContextFiles, contextFiles...)
-	}
+	data.ContextFiles = append(data.ContextFiles, contextFiles...)
 	return data, nil
 }
 

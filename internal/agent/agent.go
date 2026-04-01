@@ -39,6 +39,8 @@ import (
 	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	compactpkg "github.com/charmbracelet/crush/internal/personal/compact"
+	"github.com/charmbracelet/crush/internal/personal/hooks"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/stringext"
@@ -301,6 +303,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
 			}
 
+			if compactpkg.IsInitialized() {
+				compactMgr := compactpkg.GetManager()
+				if compactMgr != nil {
+					result := compactMgr.Process(prepared.Messages, int(largeModel.CatwalkCfg.ContextWindow))
+					compactMgr.LogResult(result)
+					if result != nil && result.TokensSaved > 0 {
+						boundaryMsg := compactpkg.CreateBoundaryMessage(result)
+						prepared.Messages = append(prepared.Messages, fantasy.NewSystemMessage(boundaryMsg.Content().Text))
+					}
+				}
+			}
+
 			var assistantMsg message.Message
 			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
 				Role:     message.Assistant,
@@ -372,6 +386,25 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			// TODO: implement
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
+			// PreToolUse hook
+			if hooks.IsInitialized() {
+				hookResult := hooks.GetManager().FirePreToolUse(
+					ctx,
+					call.SessionID,
+					tc.ToolName,
+					tc.ToolCallID,
+					tc.Input,
+				)
+				if hookResult != nil && hookResult.ShouldBlock() {
+					slog.Warn("PreToolUse hook blocked tool",
+						"tool", tc.ToolName,
+						"reason", hookResult.Reason,
+					)
+					// Return error to signal tool execution was blocked
+					return fmt.Errorf("tool blocked by hook: %s", hookResult.Reason)
+				}
+			}
+
 			toolCall := message.ToolCall{
 				ID:               tc.ToolCallID,
 				Name:             tc.ToolName,
@@ -385,6 +418,24 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 			return a.messages.Update(ctx, *currentAssistant)
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
+			// PostToolUse hook
+			if hooks.IsInitialized() {
+				hookResult := hooks.GetManager().FirePostToolUse(
+					ctx,
+					call.SessionID,
+					result.ToolName,
+					result.ToolCallID,
+					nil,
+					result.Result,
+				)
+				if hookResult != nil && hookResult.AdditionalContext != "" {
+					slog.Debug("PostToolUse hook additional context",
+						"tool", result.ToolName,
+						"context", hookResult.AdditionalContext,
+					)
+				}
+			}
+
 			toolResult := a.convertToToolResult(result)
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
@@ -559,6 +610,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 		})
 	}
 
+	// Stop hook
+	if hooks.IsInitialized() {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			lastMsg := currentAssistant.Content().Text
+			hooks.GetManager().FireStop(
+				ctx,
+				call.SessionID,
+				lastMsg,
+			)
+		}()
+	}
+
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions); summarizeErr != nil {
@@ -634,6 +699,20 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	}
 
 	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
+	if compactpkg.IsInitialized() {
+		compactMgr := compactpkg.GetManager()
+		if compactMgr != nil {
+			memoryQuery := buildMemoryQuery(msgs)
+			if memoryContext := compactMgr.GetMemorySummaryContext(memoryQuery); memoryContext != "" {
+				summaryPromptText += "\n\n" + memoryContext
+			}
+			if extracted, extractErr := compactMgr.ExtractMemories(ctx, msgs, sessionID); extractErr != nil {
+				slog.Warn("Memory compact failed", "error", extractErr)
+			} else if extracted > 0 {
+				slog.Info("Memory compact extracted memories", "session_id", sessionID, "count", extracted)
+			}
+		}
+	}
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
@@ -796,6 +875,29 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 		}
 	}
 	return msgs, nil
+}
+
+func buildMemoryQuery(msgs []message.Message) string {
+	var parts []string
+	for i := len(msgs) - 1; i >= 0 && len(parts) < 6; i-- {
+		msg := msgs[i]
+		if msg.Role != message.User && msg.Role != message.Assistant && msg.Role != message.Tool {
+			continue
+		}
+		if text := msg.Content().Text; text != "" {
+			parts = append(parts, text)
+		}
+		for _, tr := range msg.ToolResults() {
+			if tr.Content != "" {
+				parts = append(parts, tr.Content)
+			}
+		}
+	}
+	query := strings.Join(parts, "\n\n")
+	if len(query) > 4_000 {
+		query = query[:4_000]
+	}
+	return query
 }
 
 // generateTitle generates a session titled based on the initial prompt.

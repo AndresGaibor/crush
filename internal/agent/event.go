@@ -1,16 +1,31 @@
 package agent
 
 import (
+	"context"
 	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/crush/internal/event"
+	"github.com/charmbracelet/crush/internal/personal/hooks"
 )
 
 func (a *sessionAgent) eventPromptSent(sessionID string) {
 	event.PromptSent(
 		a.eventCommon(sessionID, a.largeModel.Get())...,
 	)
+
+	// SessionStart hook
+	if hooks.IsInitialized() {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			hooks.GetManager().FireSessionStart(
+				ctx,
+				sessionID,
+				"startup",
+			)
+		}()
+	}
 }
 
 func (a *sessionAgent) eventPromptResponded(sessionID string, duration time.Duration) {

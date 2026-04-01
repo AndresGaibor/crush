@@ -10,7 +10,7 @@ internal/personal/memory/
 ├── scanner.go         # Búsqueda por relevancia y filtrado
 ├── autogen.go         # Detección de patrones (preparado para fase 2)
 ├── aging.go           # Envejecimiento y limpieza de memorias antiguas
-├── tool.go            # Implementación de la herramienta para el agente
+├── tool.go            # Helper conceptual; la tool real vive en internal/agent/tools/memory_tool.go
 ├── tool.md            # Documentación de la herramienta
 └── init.go            # Inicialización y singletons
 
@@ -131,6 +131,10 @@ id: project-conventions
    - Infraestructura lista para fase 2
    - Observación de correcciones del usuario
    - Generación automática de sugerencias
+
+7. **Visibilidad en la UI**
+   - Resumen de memorias activas en el sidebar
+   - Memorias recientes con scope y tags
 
 ## Pruebas
 

@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/crush/internal/home"
+	"gopkg.in/yaml.v3"
 )
 
 // Memory representa una memoria persistente almacenada como archivo Markdown.
@@ -127,7 +129,7 @@ func (m *MemoryManager) Save(id string, content string, scope MemoryScope, tags 
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(tag)
+			sb.WriteString(strconv.Quote(tag))
 		}
 		sb.WriteString("]\n")
 		sb.WriteString("---\n\n")
@@ -151,7 +153,7 @@ func (m *MemoryManager) Save(id string, content string, scope MemoryScope, tags 
 		ID:        safeID,
 		Path:      path,
 		Scope:     scope,
-		Tags:      tags,
+		Tags:      append([]string(nil), tags...),
 		CreatedAt: info.ModTime(), // Si sobrescribe, usa la fecha actual
 		UpdatedAt: info.ModTime(),
 		Size:      info.Size(),
@@ -180,6 +182,8 @@ func (m *MemoryManager) Load(id string) (*Memory, error) {
 			ID:        sanitizeFilename(id),
 			Path:      path,
 			Scope:     scope,
+			Tags:      extractTags(path),
+			CreatedAt: info.ModTime(),
 			Content:   string(content),
 			UpdatedAt: info.ModTime(),
 			Size:      info.Size(),
@@ -291,47 +295,81 @@ func extractTags(path string) []string {
 		return nil
 	}
 
-	lines := strings.Split(string(content), "\n")
-	if len(lines) < 3 || !strings.HasPrefix(lines[0], "---") {
+	frontmatter, ok := extractFrontmatter(string(content))
+	if !ok {
 		return nil
 	}
 
-	// Buscar cierre del frontmatter
-	var endIdx int
+	tags, err := parseTags(frontmatter)
+	if err != nil {
+		return nil
+	}
+	return tags
+}
+
+func extractFrontmatter(content string) (string, bool) {
+	lines := strings.Split(content, "\n")
+	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "---" {
+		return "", false
+	}
+
 	for i := 1; i < len(lines); i++ {
 		if strings.TrimSpace(lines[i]) == "---" {
-			endIdx = i
-			break
+			return strings.Join(lines[1:i], "\n"), true
 		}
 	}
-	if endIdx == 0 {
-		return nil
+	return "", false
+}
+
+func parseTags(frontmatter string) ([]string, error) {
+	var meta map[string]any
+	if err := yaml.Unmarshal([]byte(frontmatter), &meta); err != nil {
+		return nil, err
 	}
 
-	frontmatter := strings.Join(lines[1:endIdx], "\n")
-	for _, line := range strings.Split(frontmatter, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "tags:") {
-			tagsStr := strings.TrimPrefix(line, "tags:")
-			tagsStr = strings.TrimSpace(tagsStr)
-			// Parsear formato YAML simple: [tag1, tag2, tag3]
-			tagsStr = strings.Trim(tagsStr, "[]")
-			if tagsStr == "" {
-				return nil
-			}
-			parts := strings.Split(tagsStr, ",")
-			var tags []string
-			for _, p := range parts {
-				tag := strings.TrimSpace(p)
-				tag = strings.Trim(tag, "\"'")
-				if tag != "" {
-					tags = append(tags, tag)
-				}
-			}
-			return tags
-		}
+	rawTags, ok := meta["tags"]
+	if !ok {
+		return nil, nil
 	}
-	return nil
+
+	switch v := rawTags.(type) {
+	case []any:
+		tags := make([]string, 0, len(v))
+		for _, item := range v {
+			tag := strings.TrimSpace(fmt.Sprint(item))
+			if tag != "" {
+				tags = append(tags, tag)
+			}
+		}
+		return tags, nil
+	case []string:
+		tags := make([]string, 0, len(v))
+		for _, tag := range v {
+			tag = strings.TrimSpace(tag)
+			if tag != "" {
+				tags = append(tags, tag)
+			}
+		}
+		return tags, nil
+	default:
+		tag := strings.TrimSpace(fmt.Sprint(v))
+		if tag == "" {
+			return nil, nil
+		}
+		return []string{tag}, nil
+	}
+}
+
+// Recent retorna las memorias más recientes, limitadas por limit.
+func (m *MemoryManager) Recent(limit int) ([]Memory, error) {
+	memories, err := m.All()
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || len(memories) <= limit {
+		return memories, nil
+	}
+	return append([]Memory(nil), memories[:limit]...), nil
 }
 
 // ToJSON serializa una lista de memorias a JSON.

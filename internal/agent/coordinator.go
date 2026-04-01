@@ -28,6 +28,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
+	pluginspkg "github.com/charmbracelet/crush/internal/personal/plugins"
 	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
@@ -504,6 +505,23 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 				break
 			}
 			slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
+		}
+	}
+
+	// Plugin tools
+	if pluginspkg.IsInitialized() {
+		pluginTools, err := pluginspkg.BuildPluginTools(
+			pluginspkg.GetManager().Registry.GetTools(),
+			c.cfg.WorkingDir(),
+		)
+		if err != nil {
+			slog.Warn("Failed to build plugin tools", "error", err)
+		} else {
+			for _, tool := range pluginTools {
+				if slices.Contains(agent.AllowedTools, tool.Info().Name) {
+					filteredTools = append(filteredTools, tool)
+				}
+			}
 		}
 	}
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {

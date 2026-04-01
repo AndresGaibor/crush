@@ -24,6 +24,10 @@ func NewAger(manager *MemoryManager, maxAge time.Duration, consolidate bool) *Ag
 
 // Stale retorna memorias que no han sido actualizadas en más de maxAge.
 func (a *Ager) Stale() ([]Memory, error) {
+	if a.maxAge <= 0 {
+		return nil, nil
+	}
+
 	memories, err := a.manager.All()
 	if err != nil {
 		return nil, err
@@ -56,6 +60,10 @@ func (a *Ager) Touch(id string) error {
 
 // Clean elimina memorias que superan el doble de maxAge.
 func (a *Ager) Clean() (int, error) {
+	if a.maxAge <= 0 {
+		return 0, nil
+	}
+
 	stale, err := a.Stale()
 	if err != nil {
 		return 0, err
@@ -95,7 +103,7 @@ func (a *Ager) Stats() MemoryStats {
 		case ScopeGlobal:
 			stats.Global++
 		}
-		if mem.UpdatedAt.Before(cutoff) {
+		if a.maxAge > 0 && mem.UpdatedAt.Before(cutoff) {
 			stats.Stale++
 		}
 		stats.TotalSize += mem.Size

@@ -73,6 +73,7 @@ func TestSaveAndLoadMemory(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, mem.ID, loaded.ID)
 	assert.Equal(t, mem.Content, loaded.Content)
+	assert.Equal(t, []string{"test"}, loaded.Tags)
 }
 
 func TestSaveGlobalMemory(t *testing.T) {
@@ -216,6 +217,13 @@ func TestExtractTags(t *testing.T) {
 	require.NoError(t, err)
 	tags = extractTags(path2)
 	assert.Nil(t, tags)
+
+	// Archivo con frontmatter YAML más rico
+	path3 := filepath.Join(tmpDir, "yaml-tags.md")
+	err = os.WriteFile(path3, []byte("---\nauthor: Crush\ntags:\n  - \"api:core\"\n  - tools\n---\n\n# Content\n"), 0o644)
+	require.NoError(t, err)
+	tags = extractTags(path3)
+	assert.Equal(t, []string{"api:core", "tools"}, tags)
 }
 
 // --- Tests de Scanner ---
@@ -418,6 +426,22 @@ func TestPatternDetection(t *testing.T) {
 	suggestions = detector.CheckSuggestions()
 	assert.Len(t, suggestions, 1)
 	assert.Equal(t, 3, suggestions[0].Count)
+	assert.Equal(t, "correction", suggestions[0].Category)
+	assert.Equal(t, "usa gin en vez de echo", suggestions[0].Pattern)
+}
+
+func TestRecentMemories(t *testing.T) {
+	t.Parallel()
+	mgr, _, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	_, _ = mgr.Save("one", "1", ScopeProject, nil)
+	_, _ = mgr.Save("two", "2", ScopeProject, nil)
+	_, _ = mgr.Save("three", "3", ScopeProject, nil)
+
+	recent, err := mgr.Recent(2)
+	require.NoError(t, err)
+	require.Len(t, recent, 2)
 }
 
 func TestExtractCorrectionsFromDiff(t *testing.T) {
@@ -425,6 +449,17 @@ func TestExtractCorrectionsFromDiff(t *testing.T) {
 	corrections := ExtractCorrectionsFromDiff(text)
 	assert.NotEmpty(t, corrections)
 	// Debería detectar al menos "tabs en vez de espacios"
+}
+
+func TestGenerateMemoryContentUsesReadableCount(t *testing.T) {
+	content := GenerateMemoryContent(SuggestedMemory{
+		Category: "preference",
+		Pattern:  "usa tabs",
+		Count:    3,
+	})
+
+	assert.Contains(t, content, "3 ocurrencias")
+	assert.Contains(t, content, "usa tabs")
 }
 
 // --- Tests de Init singleton ---
