@@ -2,6 +2,7 @@ package memory
 
 import (
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 )
@@ -32,17 +33,20 @@ func Init(projectDir string) (*MemoryManager, error) {
 		)
 
 		// Limpiar memorias muy antiguas al iniciar (background)
-		go func() {
-			ager := NewAger(instance, 180*24*time.Hour, false) // 6 meses
-			cleaned, err := ager.Clean()
-			if err != nil {
-				slog.Warn("Failed to clean stale memories", "error", err)
-				return
-			}
-			if cleaned > 0 {
-				slog.Info("Cleaned stale memories on startup", "count", cleaned)
-			}
-		}()
+		// Solo si no estamos en modo testing
+		if os.Getenv("CRUSH_TESTING") == "" && instance != nil {
+			go func() {
+				ager := NewAger(instance, 180*24*time.Hour, false) // 6 meses
+				cleaned, err := ager.Clean()
+				if err != nil {
+					slog.Warn("Failed to clean stale memories", "error", err)
+					return
+				}
+				if cleaned > 0 {
+					slog.Info("Cleaned stale memories on startup", "count", cleaned)
+				}
+			}()
+		}
 	})
 	return instance, initErr
 }

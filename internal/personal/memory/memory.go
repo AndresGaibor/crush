@@ -51,7 +51,7 @@ type MemoryManager struct {
 // NewMemoryManager crea un nuevo MemoryManager.
 func NewMemoryManager(projectDir string) (*MemoryManager, error) {
 	projectMemDir := filepath.Join(projectDir, ".crush", "memory")
-	globalMemDir := filepath.Join(home.Dir(), "memory")
+	globalMemDir := filepath.Join(home.Dir(), ".config", "crush", "memory")
 
 	// Crear directorios si no existen
 	for _, dir := range []string{projectMemDir, globalMemDir} {
@@ -117,8 +117,28 @@ func (m *MemoryManager) Save(id string, content string, scope MemoryScope, tags 
 		dir = m.projectMemDir
 	}
 
+	// Si hay tags, agregar frontmatter YAML
+	var finalContent string
+	if len(tags) > 0 {
+		var sb strings.Builder
+		sb.WriteString("---\n")
+		sb.WriteString("tags: [")
+		for i, tag := range tags {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(tag)
+		}
+		sb.WriteString("]\n")
+		sb.WriteString("---\n\n")
+		sb.WriteString(content)
+		finalContent = sb.String()
+	} else {
+		finalContent = content
+	}
+
 	path := filepath.Join(dir, safeID+".md")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(finalContent), 0o644); err != nil {
 		return nil, fmt.Errorf("writing memory file: %w", err)
 	}
 
@@ -135,7 +155,7 @@ func (m *MemoryManager) Save(id string, content string, scope MemoryScope, tags 
 		CreatedAt: info.ModTime(), // Si sobrescribe, usa la fecha actual
 		UpdatedAt: info.ModTime(),
 		Size:      info.Size(),
-		Content:   content,
+		Content:   finalContent,
 	}
 
 	slog.Info("Memory saved", "id", safeID, "scope", scope, "size", info.Size())
