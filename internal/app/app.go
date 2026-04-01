@@ -31,6 +31,7 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/charmbracelet/crush/internal/personal/memory"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -106,6 +107,13 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 	}
 
 	app.setupEvents()
+
+	// Initialize memory system
+	go func() {
+		if _, err := memory.Init(store.WorkingDir()); err != nil {
+			slog.Warn("Failed to initialize memory system", "error", err)
+		}
+	}()
 
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)

@@ -165,6 +165,16 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		files[pathKey] = content
 	}
 
+	// Inject .crush/memory/ directory if it exists
+	memoryPath := filepath.Join(store.WorkingDir(), ".crush", "memory")
+	memoryPathKey := strings.ToLower(memoryPath)
+	if _, ok := files[memoryPathKey]; !ok {
+		if info, err := os.Stat(memoryPath); err == nil && info.IsDir() {
+			content := processContextPath(memoryPath, store)
+			files[memoryPathKey] = content
+		}
+	}
+
 	// Discover and load skills metadata.
 	var availSkillXML string
 	if len(cfg.Options.SkillsPaths) > 0 {
