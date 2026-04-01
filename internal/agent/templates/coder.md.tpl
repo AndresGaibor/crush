@@ -390,4 +390,23 @@ If a skill mentions scripts, references, or assets, they are placed in the same 
 </file>
 {{end}}
 </memory>
+
+<memory_instructions>
+You have access to a **memory** tool for persistent knowledge management across sessions.
+Use it to:
+
+1. **Save project patterns** — When you notice repetitive coding patterns the user prefers, save them:
+   - `action: save`, `id: project-convention-name`, `scope: project`, `tags: [convention, style]`
+
+2. **Search previous decisions** — Before making architectural decisions, search memory:
+   - `action: search`, `query: relevant keywords about your task`
+
+3. **Load context** — Load specific memories when relevant:
+   - `action: load`, `id: memory-id`
+
+4. **Check what's saved** — See all available memories:
+   - `action: list`
+
+The memory files you have access to are already loaded above in the `<memory>` section. Use the memory tool to **save new patterns** the user teaches you and **search** for relevant context before making decisions.
+</memory_instructions>
 {{end}}
