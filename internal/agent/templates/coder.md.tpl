@@ -382,6 +382,17 @@ If a skill mentions scripts, references, or assets, they are placed in the same 
 </skills_usage>
 {{end}}
 
+{{- if .AvailSubagentXML}}
+
+{{.AvailSubagentXML}}
+
+<subagents_usage>
+When a task matches a subagent description, delegate it with the delegate_to_agent tool.
+Subagents have isolated context and a restricted tool set, so use them for focused work that would otherwise pollute the main conversation.
+Prefer the most specific subagent available. If multiple subagents match, choose the one whose description best fits the task.
+</subagents_usage>
+{{end}}
+
 {{if .ContextFiles}}
 <memory>
 {{range .ContextFiles}}

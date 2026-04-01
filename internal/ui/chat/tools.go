@@ -242,6 +242,8 @@ func NewToolMessageItem(
 		item = NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
 	case agent.AgentToolName:
 		item = NewAgentToolMessageItem(sty, toolCall, result, canceled)
+	case "delegate_to_agent":
+		item = NewDelegateToAgentToolMessageItem(sty, toolCall, result, canceled)
 	case tools.AgenticFetchToolName:
 		item = NewAgenticFetchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.WebFetchToolName:
@@ -1371,6 +1373,8 @@ func prettifyToolName(name string) string {
 	switch name {
 	case agent.AgentToolName:
 		return "Agent"
+	case "delegate_to_agent":
+		return "Subagent"
 	case tools.BashToolName:
 		return "Bash"
 	case tools.JobOutputToolName:

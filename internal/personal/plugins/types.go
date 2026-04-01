@@ -46,27 +46,27 @@ type Plugin struct {
 
 // Manifest es el contenido parseado de plugin.json.
 type Manifest struct {
-	Name        string                        `json:"name"`
-	Version     string                        `json:"version,omitempty"`
-	Description string                        `json:"description,omitempty"`
-	Author      string                        `json:"author,omitempty"`
-	License     string                        `json:"license,omitempty"`
-	Keywords    []string                      `json:"keywords,omitempty"`
-	Tools       []ToolDecl                    `json:"tools,omitempty"`
-	Skills      []string                      `json:"skills,omitempty"`
-	Hooks       json.RawMessage               `json:"hooks,omitempty"`       // path string or inline hooks
-	MCPServers  map[string]MCPDecl            `json:"mcpServers,omitempty"`
-	Commands    []json.RawMessage             `json:"commands,omitempty"`
-	Agents      []string                      `json:"agents,omitempty"`
-	UserConfig  map[string]UserConfigField    `json:"userConfig,omitempty"`
-	Settings    json.RawMessage               `json:"settings,omitempty"`
+	Name        string                     `json:"name"`
+	Version     string                     `json:"version,omitempty"`
+	Description string                     `json:"description,omitempty"`
+	Author      string                     `json:"author,omitempty"`
+	License     string                     `json:"license,omitempty"`
+	Keywords    []string                   `json:"keywords,omitempty"`
+	Tools       []ToolDecl                 `json:"tools,omitempty"`
+	Skills      []string                   `json:"skills,omitempty"`
+	Hooks       json.RawMessage            `json:"hooks,omitempty"` // path string or inline hooks
+	MCPServers  map[string]MCPDecl         `json:"mcpServers,omitempty"`
+	Commands    []json.RawMessage          `json:"commands,omitempty"`
+	Agents      []string                   `json:"agents,omitempty"`
+	UserConfig  map[string]UserConfigField `json:"userConfig,omitempty"`
+	Settings    json.RawMessage            `json:"settings,omitempty"`
 }
 
 // ToolDecl declara una herramienta que el plugin proporciona.
 type ToolDecl struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
-	Source      string          `json:"source"`               // Path al .md con la tool
+	Source      string          `json:"source"`                // Path al .md con la tool
 	InputSchema json.RawMessage `json:"inputSchema,omitempty"` // JSON Schema para input
 }
 
@@ -83,7 +83,7 @@ type MCPDecl struct {
 
 // UserConfigField define un campo de configuración del usuario para el plugin.
 type UserConfigField struct {
-	Type        string `json:"type"`                   // "string"|"number"|"boolean"
+	Type        string `json:"type"` // "string"|"number"|"boolean"
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
 	Default     any    `json:"default,omitempty"`
@@ -93,9 +93,9 @@ type UserConfigField struct {
 
 // PluginConfig es la configuración de plugins desde crush.json.
 type PluginConfig struct {
-	EnabledPlugins map[PluginID]PluginEnable     `json:"enabled_plugins,omitempty"`
-	PluginOptions  map[PluginID]map[string]any   `json:"plugin_options,omitempty"`
-	PluginsDir     string                        `json:"plugins_dir,omitempty"`
+	EnabledPlugins map[PluginID]PluginEnable   `json:"enabled_plugins,omitempty"`
+	PluginOptions  map[PluginID]map[string]any `json:"plugin_options,omitempty"`
+	PluginsDir     string                      `json:"plugins_dir,omitempty"`
 }
 
 // PluginEnable puede ser true, false, o un array de versiones permitidas.
@@ -103,6 +103,12 @@ type PluginEnable any // bool | []string
 
 // IsEnabled retorna true si el plugin está habilitado en la config.
 func (c *PluginConfig) IsEnabled(id PluginID) bool {
+	return c.IsEnabledForVersion(id, "")
+}
+
+// IsEnabledForVersion retorna true si el plugin está habilitado para una
+// versión específica.
+func (c *PluginConfig) IsEnabledForVersion(id PluginID, version string) bool {
 	if c == nil || c.EnabledPlugins == nil {
 		return true // Si no hay config, todo está habilitado por defecto
 	}
@@ -112,6 +118,34 @@ func (c *PluginConfig) IsEnabled(id PluginID) bool {
 	}
 	if b, ok := val.(bool); ok {
 		return b
+	}
+	if versions, ok := val.([]string); ok {
+		if len(versions) == 0 {
+			return false
+		}
+		if version == "" {
+			return false
+		}
+		for _, allowed := range versions {
+			if matchVersionRequirement(allowed, version) {
+				return true
+			}
+		}
+		return false
+	}
+	if versions, ok := val.([]any); ok {
+		if len(versions) == 0 {
+			return false
+		}
+		if version == "" {
+			return false
+		}
+		for _, allowed := range versions {
+			if s, ok := allowed.(string); ok && matchVersionRequirement(s, version) {
+				return true
+			}
+		}
+		return false
 	}
 	return true
 }

@@ -10,10 +10,10 @@ import (
 // para el evento proporcionado.
 //
 // Estrategias de matching:
-//   1. Vacío o "*" → matchea todo
-//   2. Pipe-separated: "Write|Edit|Bash" → matchea exactamente contra tool_name
-//   3. Glob con paréntesis: "Bash(rm *)" → glob match contra tool_name + input
-//   4. Cualquier otro string → se interpreta como regex
+//  1. Vacío o "*" → matchea todo
+//  2. Pipe-separated: "Write|Edit|Bash" → matchea exactamente contra tool_name
+//  3. Glob con paréntesis: "Bash(rm *)" → glob match contra tool_name + input
+//  4. Cualquier otro string → se interpreta como regex
 func MatchHook(matcher string, event HookEvent) bool {
 	if matcher == "" || matcher == "*" {
 		return true

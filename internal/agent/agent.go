@@ -245,6 +245,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 	defer a.activeRequests.Del(call.SessionID)
 
 	history, files := a.preparePrompt(msgs, call.Attachments...)
+	history = prependPlanModeReminder(call.SessionID, history)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)

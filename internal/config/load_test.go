@@ -49,6 +49,8 @@ func TestConfig_setDefaults(t *testing.T) {
 	require.NotNil(t, cfg.Options)
 	require.NotNil(t, cfg.Options.TUI)
 	require.NotNil(t, cfg.Options.ContextPaths)
+	require.NotNil(t, cfg.Options.SkillsPaths)
+	require.NotNil(t, cfg.Options.SubagentsPaths)
 	require.NotNil(t, cfg.Providers)
 	require.NotNil(t, cfg.Models)
 	require.NotNil(t, cfg.LSP)
@@ -58,6 +60,19 @@ func TestConfig_setDefaults(t *testing.T) {
 	for _, path := range defaultContextPaths {
 		require.Contains(t, cfg.Options.ContextPaths, path)
 	}
+	for _, path := range GlobalSkillsDirs() {
+		require.Contains(t, cfg.Options.SkillsPaths, path)
+	}
+	for _, path := range GlobalSubagentDirs() {
+		require.Contains(t, cfg.Options.SubagentsPaths, path)
+	}
+	for _, path := range ProjectSkillsDir("/tmp") {
+		require.Contains(t, cfg.Options.SkillsPaths, path)
+	}
+	for _, path := range ProjectSubagentDirs("/tmp") {
+		require.Contains(t, cfg.Options.SubagentsPaths, path)
+	}
+	require.Contains(t, cfg.Options.SubagentsPaths, filepath.Join("/tmp", ".claude", "agents"))
 }
 
 func TestConfig_configureProviders(t *testing.T) {
@@ -489,8 +504,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "glob", "ls", "memory", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, expectedToolsExcept("edit", "download", "grep"), coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -513,11 +527,27 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "fetch", "agentic_fetch", "memory", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, expectedToolsExcept("glob", "grep", "ls", "sourcegraph", "view"), coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
 	assert.Len(t, taskAgent.AllowedTools, 0)
+}
+
+func expectedToolsExcept(disabled ...string) []string {
+	disabledSet := make(map[string]struct{}, len(disabled))
+	for _, tool := range disabled {
+		disabledSet[tool] = struct{}{}
+	}
+
+	var allowed []string
+	for _, tool := range allToolNames() {
+		if _, ok := disabledSet[tool]; ok {
+			continue
+		}
+		allowed = append(allowed, tool)
+	}
+	return allowed
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {

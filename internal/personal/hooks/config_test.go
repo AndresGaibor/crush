@@ -111,7 +111,7 @@ func TestMerge(t *testing.T) {
 		PreToolUse: {{Matcher: "Bash", Command: "echo base"}},
 	}
 	override := HookConfigMap{
-		PreToolUse: {{Matcher: "Write", Command: "echo override"}},
+		PreToolUse:  {{Matcher: "Write", Command: "echo override"}},
 		PostToolUse: {{Matcher: "Edit", Command: "echo edit"}},
 	}
 

@@ -117,7 +117,7 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	m.input.Focus()
 
 	m.keyMap.Tab = key.NewBinding(
-		key.WithKeys("tab", "shift+tab"),
+		key.WithKeys("tab", "shift+tab", "backtab"),
 		key.WithHelp("tab", "toggle type"),
 	)
 	m.keyMap.Select = key.NewBinding(

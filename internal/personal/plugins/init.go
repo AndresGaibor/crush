@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"fmt"
 	"log/slog"
 	"sync"
 )
@@ -13,9 +14,11 @@ var (
 // Manager es el gestor central del sistema de plugins.
 // Coordina la carga, el registro y la integración con Crush.
 type Manager struct {
-	Loader   *Loader
-	Registry *Registry
-	Config   *PluginConfig
+	mu         sync.RWMutex
+	Loader     *Loader
+	Registry   *Registry
+	Config     *PluginConfig
+	projectDir string
 }
 
 // Init inicializa el sistema de plugins completo.
@@ -45,9 +48,10 @@ func Init(projectDir string) (*Manager, error) {
 		registry.PopulateFromPlugins(plugins)
 
 		instance = &Manager{
-			Loader:   loader,
-			Registry: registry,
-			Config:   config,
+			Loader:     loader,
+			Registry:   registry,
+			Config:     config,
+			projectDir: projectDir,
 		}
 
 		counts := registry.Count()
@@ -76,4 +80,33 @@ func IsInitialized() bool {
 func Reset() {
 	instanceOnce = sync.Once{}
 	instance = nil
+}
+
+// setState reemplaza el estado interno del manager de forma atómica.
+func (m *Manager) setState(loader *Loader, registry *Registry, config *PluginConfig) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.Loader = loader
+	m.Registry = registry
+	m.Config = config
+}
+
+// snapshot retorna una copia segura del estado actual del manager.
+func (m *Manager) snapshot() (*Loader, *Registry, *PluginConfig, string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return m.Loader, m.Registry, m.Config, m.projectDir
+}
+
+func (m *Manager) ensureProjectDir() error {
+	if m == nil {
+		return fmt.Errorf("plugin manager is nil")
+	}
+	_, _, _, projectDir := m.snapshot()
+	if projectDir == "" {
+		return fmt.Errorf("plugin manager project directory is empty")
+	}
+	return nil
 }

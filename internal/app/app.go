@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -32,9 +33,13 @@ import (
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/permission"
 	compactpkg "github.com/charmbracelet/crush/internal/personal/compact"
+	personalcron "github.com/charmbracelet/crush/internal/personal/cron"
 	"github.com/charmbracelet/crush/internal/personal/hooks"
 	"github.com/charmbracelet/crush/internal/personal/memory"
+	"github.com/charmbracelet/crush/internal/personal/planmode"
 	pluginspkg "github.com/charmbracelet/crush/internal/personal/plugins"
+	personalSubagents "github.com/charmbracelet/crush/internal/personal/subagents"
+	"github.com/charmbracelet/crush/internal/personal/tasks"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/shell"
@@ -121,38 +126,51 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore) (*App, er
 	// Initialize compact system.
 	compactpkg.Init(store.WorkingDir())
 
-	// Initialize hooks system
-	go func() {
-		hooksConfig, err := hooks.LoadFromBytes(cfg.Hooks)
-		if err != nil {
-			slog.Warn("Failed to load hooks config", "error", err)
-			hooksConfig = make(hooks.HookConfigMap)
-		}
-		hooks.Init(store.WorkingDir(), hooksConfig)
-	}()
+	// Initialize plan mode system.
+	if err := planmode.Init(conn); err != nil {
+		slog.Warn("Failed to initialize plan mode system", "error", err)
+	}
 
-	// Initialize plugins system
-	go func() {
-		pluginsMgr, err := pluginspkg.Init(store.WorkingDir())
-		if err != nil {
-			slog.Warn("Failed to initialize plugin system", "error", err)
-			return
-		}
+	// Initialize tasks system.
+	if err := tasks.Init(conn); err != nil {
+		slog.Warn("Failed to initialize tasks system", "error", err)
+	}
 
-		// Register hooks de plugins en el HookManager
-		if pluginsMgr != nil && hooks.IsInitialized() {
-			pluginspkg.RegisterPluginHooks(
-				pluginsMgr.Registry,
-				hooks.GetManager(),
-			)
-		}
+	// Initialize subagents registry.
+	if err := personalSubagents.Init(cfg.Options.SubagentsPaths); err != nil {
+		slog.Warn("Failed to initialize subagents system", "error", err)
+	}
 
-		// Agregar skill paths de plugins al config
-		if pluginsMgr != nil {
-			pluginSkillPaths := pluginspkg.GetPluginSkillPaths(pluginsMgr.Registry.GetSkills())
-			cfg.Options.SkillsPaths = append(cfg.Options.SkillsPaths, pluginSkillPaths...)
-		}
-	}()
+	// Initialize hooks system.
+	hooksConfig, err := hooks.LoadFromBytes(cfg.Hooks)
+	if err != nil {
+		slog.Warn("Failed to load hooks config", "error", err)
+		hooksConfig = make(hooks.HookConfigMap)
+	}
+	hookMgr := hooks.Init(store.WorkingDir(), hooksConfig)
+
+	// Initialize plugins system and merge its integrations before the agent
+	// and MCP clients start consuming configuration.
+	pluginsMgr, err := pluginspkg.Init(store.WorkingDir())
+	if err != nil {
+		slog.Warn("Failed to initialize plugin system", "error", err)
+	} else if pluginsMgr != nil {
+		pluginsMgr.ApplyToConfig(cfg, hookMgr)
+	}
+
+	cronDirs := []string{filepath.Join(store.WorkingDir(), ".crush")}
+	if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
+		cronDirs = append(cronDirs, filepath.Join(homeDir, ".config", "crush"))
+	}
+	cronCfg := personalcron.LoadConfigFromDirs(cronDirs)
+	if err := personalcron.Init(conn, cronCfg); err != nil {
+		slog.Warn("Failed to initialize cron system", "error", err)
+	} else {
+		app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {
+			personalcron.Shutdown()
+			return nil
+		})
+	}
 
 	// Check for updates in the background.
 	go app.checkForUpdates(ctx)
@@ -589,6 +607,29 @@ func (app *App) InitCoderAgent(ctx context.Context) error {
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
+	}
+
+	if personalcron.IsInitialized() {
+		personalcron.SetRunner(func(ctx context.Context, job *personalcron.CronJob) (string, error) {
+			sessionID := strings.TrimSpace(job.SessionID)
+			if sessionID == "" {
+				session, err := app.Sessions.Create(ctx, "Cron: "+job.Name)
+				if err != nil {
+					return "", err
+				}
+				sessionID = session.ID
+				job.SessionID = sessionID
+			}
+
+			result, err := app.AgentCoordinator.Run(ctx, sessionID, job.Prompt)
+			if err != nil {
+				return "", err
+			}
+			if result == nil {
+				return "", nil
+			}
+			return result.Response.Content.Text(), nil
+		})
 	}
 	return nil
 }

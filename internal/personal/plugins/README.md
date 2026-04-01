@@ -142,6 +142,12 @@ Enable/disable plugins in `crush.json`:
 }
 ```
 
+Version allowlists support semver expressions such as:
+
+- `1.2.3` for an exact match
+- `>=1.2.0 <2.0.0` for a version range
+- `^1.4.0` and `~1.4.2` for caret and tilde matching
+
 ## Plugin Naming
 
 - **Name**: kebab-case, 2-64 characters (required)
@@ -159,6 +165,17 @@ Plugins are discovered and loaded during application startup:
 5. Merge configurations
 
 Invalid plugins are logged but don't crash the system.
+
+## Collision Rules
+
+- **Tools**: if two plugins expose the same tool name, the later one is skipped and the collision is logged.
+- **Skills**: skill paths are namespaced by plugin ID, so the visible registration stays unique.
+- **MCP servers**: plugin MCP server names are namespaced by plugin ID before merge.
+- **Hooks**: plugin hooks are merged into the user hook config; user hooks keep priority in the merged order.
+
+## Reloading
+
+The plugin manager exposes `Reload()` and `ReloadAndApply()` so callers can opt into hot reload flows without forcing file watchers on every run.
 
 ## Development
 
@@ -212,7 +229,7 @@ The plugin system is built on these core components:
 - **tools.go**: Conversion of plugin tools to fantasy.AgentTool
 - **hooks.go**: Integration with hook system
 - **skills.go**: Integration with skill discovery system
-- **mcp.go**: Stub for future MCP server integration
+- **mcp.go**: Conversion and merge of plugin-defined MCP servers
 - **config.go**: Loading plugin configuration from crush.json
 - **init.go**: Manager singleton and system initialization
 
@@ -226,7 +243,7 @@ Not implemented yet:
 - CLI commands for plugin management
 - Cross-plugin dependencies
 - npm/git-remote plugins
-- Hot reload without restart
+- Automatic hot reload without restart
 
 ## Status
 
@@ -236,9 +253,9 @@ Not implemented yet:
 - Hook integration
 - Skill support
 - Plugin configuration
+- MCP server registration
 
 📋 **Future Phases:**
-- MCP server integration
 - Plugin marketplace
 - Binary plugin support
 - Hot reload capability

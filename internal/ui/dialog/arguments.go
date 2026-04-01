@@ -81,7 +81,7 @@ func NewArguments(com *common.Common, title, description string, arguments []com
 		key.WithHelp("↓/tab", "next"),
 	)
 	a.keyMap.Previous = key.NewBinding(
-		key.WithKeys("up", "shift+tab"),
+		key.WithKeys("up", "shift+tab", "backtab"),
 		key.WithHelp("↑/shift+tab", "previous"),
 	)
 	a.keyMap.Close = CloseKey

@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/crush/internal/personal/memory"
+	personalSubagents "github.com/charmbracelet/crush/internal/personal/subagents"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -242,6 +243,50 @@ func (m *UI) memoryInfo(width int, maxItems int) string {
 	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
 }
 
+// subagentsInfo renders the available subagents section in the sidebar.
+func (m *UI) subagentsInfo(width, maxItems int, isSection bool) string {
+	t := m.com.Styles
+	subagents := personalSubagents.List()
+	title := t.ResourceGroupTitle.Render("Subagents")
+	if isSection {
+		title = common.Section(t, title, width)
+	}
+
+	list := t.ResourceAdditionalText.Render("None")
+	if len(subagents) > 0 {
+		var rendered []string
+		for _, subagent := range subagents {
+			if maxItems > 0 && len(rendered) >= maxItems {
+				break
+			}
+
+			icon := t.ResourceBusyIcon.String()
+			if subagent.AutoDelegate {
+				icon = t.ResourceOnlineIcon.String()
+			}
+
+			titleText := t.ResourceName.Render(subagent.Name)
+			description := subagent.Description
+			extra := ""
+			if len(subagent.Tools) > 0 {
+				extra = t.Subtle.Render(fmt.Sprintf("%d tools", len(subagent.Tools)))
+			} else {
+				extra = t.Subtle.Render("inherits tools")
+			}
+
+			rendered = append(rendered, common.Status(t, common.StatusOpts{
+				Icon:         icon,
+				Title:        titleText,
+				Description:  description,
+				ExtraContent: extra,
+			}, width))
+		}
+		list = strings.Join(rendered, "\n")
+	}
+
+	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
+}
+
 // sidebar renders the chat sidebar containing session title, working
 // directory, model info, file list, LSP status, and MCP status.
 func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
@@ -270,6 +315,11 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		m.modelInfo(width),
 		"",
 	}
+	if m.session != nil && !m.planPanelOpen {
+		if banner := planModeBanner(m.com.Styles, m.session.ID, width); banner != "" {
+			blocks = append(blocks, banner, "")
+		}
+	}
 
 	sidebarHeader := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -284,6 +334,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	maxFiles, maxMemories, maxLSPs, maxMCPs := getDynamicHeightLimits(remainingHeight)
 
 	memorySection := m.memoryInfo(width, maxMemories)
+	subagentsSection := m.subagentsInfo(width, maxMemories, true)
 	lspSection := m.lspInfo(width, maxLSPs, true)
 	mcpSection := m.mcpInfo(width, maxMCPs, true)
 	filesSection := m.filesInfo(m.com.Store().WorkingDir(), width, maxFiles, true)
@@ -297,6 +348,8 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 					lipgloss.Left,
 					sidebarHeader,
 					memorySection,
+					"",
+					subagentsSection,
 					"",
 					filesSection,
 					"",

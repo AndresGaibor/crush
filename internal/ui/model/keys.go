@@ -63,6 +63,7 @@ type KeyMap struct {
 	Models   key.Binding
 	Suspend  key.Binding
 	Sessions key.Binding
+	PlanMode key.Binding
 	Tab      key.Binding
 }
 
@@ -92,9 +93,13 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("ctrl+s"),
 			key.WithHelp("ctrl+s", "sessions"),
 		),
+		PlanMode: key.NewBinding(
+			key.WithKeys("ctrl+shift+p"),
+			key.WithHelp("ctrl+shift+p", "plan"),
+		),
 		Tab: key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "change focus"),
+			key.WithKeys("tab", "shift+tab", "backtab"),
+			key.WithHelp("tab/shift+tab", "change focus"),
 		),
 	}
 
@@ -165,8 +170,8 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("esc", "cancel"),
 	)
 	km.Chat.Tab = key.NewBinding(
-		key.WithKeys("tab"),
-		key.WithHelp("tab", "change focus"),
+		key.WithKeys("tab", "shift+tab", "backtab"),
+		key.WithHelp("tab/shift+tab", "change focus"),
 	)
 	km.Chat.Details = key.NewBinding(
 		key.WithKeys("ctrl+d"),

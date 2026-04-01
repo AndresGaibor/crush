@@ -22,13 +22,13 @@ func AllHookEvents() []HookEventType {
 
 // HookConfig es la configuración de un hook individual desde crush.json.
 type HookConfig struct {
-	Matcher  string       `json:"matcher,omitempty"`  // Pattern: "Bash", "Write", "Bash(rm *)", "*"
-	Command  string       `json:"command"`            // Comando a ejecutar
-	Shell    string       `json:"shell,omitempty"`    // Shell a usar (default: /bin/sh)
-	Timeout  int          `json:"timeout,omitempty"`  // Timeout en ms (default: 30000)
-	Enabled  *bool        `json:"enabled,omitempty"`  // Habilitado/deshabilitado
-	Once     bool         `json:"once,omitempty"`     // Ejecutar solo una vez
-	Async    bool         `json:"async,omitempty"`    // Ejecutar en background
+	Matcher string `json:"matcher,omitempty"` // Pattern: "Bash", "Write", "Bash(rm *)", "*"
+	Command string `json:"command"`           // Comando a ejecutar
+	Shell   string `json:"shell,omitempty"`   // Shell a usar (default: /bin/sh)
+	Timeout int    `json:"timeout,omitempty"` // Timeout en ms (default: 30000)
+	Enabled *bool  `json:"enabled,omitempty"` // Habilitado/deshabilitado
+	Once    bool   `json:"once,omitempty"`    // Ejecutar solo una vez
+	Async   bool   `json:"async,omitempty"`   // Ejecutar en background
 }
 
 // HookConfigMap es el mapa de eventos → lista de hooks.
@@ -37,16 +37,16 @@ type HookConfigMap map[HookEventType][]HookConfig
 
 // HookEvent es el evento que se pasa a los hooks para ejecución.
 type HookEvent struct {
-	Type        HookEventType `json:"hook_event_name"`
-	SessionID   string        `json:"session_id,omitempty"`
-	Cwd         string        `json:"cwd,omitempty"`
-	ToolName    string        `json:"tool_name,omitempty"`
-	ToolInput   interface{}   `json:"tool_input,omitempty"`
-	ToolOutput  interface{}   `json:"tool_response,omitempty"`
-	ToolUseID   string        `json:"tool_use_id,omitempty"`
-	Source      string        `json:"source,omitempty"`      // SessionStart: "startup", "resume"
-	Message     string        `json:"message,omitempty"`     // Stop: último mensaje
-	StopReason  string        `json:"stop_reason,omitempty"` // Stop: razón
+	Type       HookEventType `json:"hook_event_name"`
+	SessionID  string        `json:"session_id,omitempty"`
+	Cwd        string        `json:"cwd,omitempty"`
+	ToolName   string        `json:"tool_name,omitempty"`
+	ToolInput  interface{}   `json:"tool_input,omitempty"`
+	ToolOutput interface{}   `json:"tool_response,omitempty"`
+	ToolUseID  string        `json:"tool_use_id,omitempty"`
+	Source     string        `json:"source,omitempty"`      // SessionStart: "startup", "resume"
+	Message    string        `json:"message,omitempty"`     // Stop: último mensaje
+	StopReason string        `json:"stop_reason,omitempty"` // Stop: razón
 }
 
 // HookResult es la respuesta de un hook ejecutado.

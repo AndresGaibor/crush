@@ -3,19 +3,30 @@ package plugins
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 )
 
+// RegistryCollision describe una colisión entre dos extensiones de plugins.
+type RegistryCollision struct {
+	Type           string
+	Name           string
+	WinnerPluginID PluginID
+	LoserPluginID  PluginID
+	Reason         string
+}
+
 // Registry es el registro central de extensiones proporcionadas por plugins.
 // Cuando un plugin se carga, registra sus tools, hooks, skills, etc. aquí.
 // El coordinator consulta el Registry para obtener todas las extensiones activas.
 type Registry struct {
-	mu       sync.RWMutex
-	entries  []RegistryEntry
-	byType   map[string][]RegistryEntry // type → entries
-	byPlugin map[PluginID][]RegistryEntry // plugin → entries
+	mu         sync.RWMutex
+	entries    []RegistryEntry
+	byType     map[string][]RegistryEntry   // type → entries
+	byPlugin   map[PluginID][]RegistryEntry // plugin → entries
+	collisions []RegistryCollision
 }
 
 // NewRegistry crea un nuevo Registry vacío.
@@ -62,6 +73,15 @@ func (r *Registry) Unregister(pluginID PluginID) {
 	for _, e := range r.entries {
 		r.byType[e.Type] = append(r.byType[e.Type], e)
 	}
+
+	var collisions []RegistryCollision
+	for _, collision := range r.collisions {
+		if collision.WinnerPluginID == pluginID || collision.LoserPluginID == pluginID {
+			continue
+		}
+		collisions = append(collisions, collision)
+	}
+	r.collisions = collisions
 }
 
 // GetByType retorna todas las extensiones de un tipo dado.
@@ -98,6 +118,13 @@ func (r *Registry) All() []RegistryEntry {
 	return append([]RegistryEntry{}, r.entries...)
 }
 
+// Collisions retorna las colisiones detectadas al registrar extensiones.
+func (r *Registry) Collisions() []RegistryCollision {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return append([]RegistryCollision{}, r.collisions...)
+}
+
 // Count retorna la cantidad de extensiones por tipo.
 func (r *Registry) Count() map[string]int {
 	r.mu.RLock()
@@ -132,6 +159,10 @@ func (r *Registry) String() string {
 
 // PopulateFromPlugins registra todas las extensiones de los plugins dados.
 func (r *Registry) PopulateFromPlugins(plugins []*Plugin) {
+	seenTools := make(map[string]PluginID)
+	seenSkills := make(map[string]PluginID)
+	seenMCP := make(map[string]PluginID)
+
 	for _, p := range plugins {
 		if p.Status != StatusEnabled || p.Manifest == nil {
 			continue
@@ -139,10 +170,15 @@ func (r *Registry) PopulateFromPlugins(plugins []*Plugin) {
 
 		// Registrar tools
 		for _, tool := range p.Manifest.Tools {
+			if owner, ok := seenTools[tool.Name]; ok {
+				r.recordCollision("tool", tool.Name, owner, p.ID, "duplicate tool name")
+				continue
+			}
+			seenTools[tool.Name] = p.ID
 			r.Register(RegistryEntry{
 				PluginID: p.ID,
 				Type:     "tool",
-				Name:     tool.Name,
+				Name:     fmt.Sprintf("%s:%s", p.ID, tool.Name),
 				Data:     tool,
 			})
 		}
@@ -154,11 +190,16 @@ func (r *Registry) PopulateFromPlugins(plugins []*Plugin) {
 				slog.Warn("Invalid skill path in plugin", "plugin", p.ID, "path", skillPath)
 				continue
 			}
-			name := strings.TrimPrefix(resolved, p.RootDir+"/")
+			entryName := fmt.Sprintf("%s:%s", p.ID, filepath.Base(resolved))
+			if owner, ok := seenSkills[entryName]; ok {
+				r.recordCollision("skill", entryName, owner, p.ID, "duplicate skill path")
+				continue
+			}
+			seenSkills[entryName] = p.ID
 			r.Register(RegistryEntry{
 				PluginID: p.ID,
 				Type:     "skill",
-				Name:     fmt.Sprintf("%s:%s", p.Name, name),
+				Name:     entryName,
 				Data:     resolved,
 			})
 		}
@@ -175,12 +216,39 @@ func (r *Registry) PopulateFromPlugins(plugins []*Plugin) {
 
 		// Registrar MCP servers
 		for serverName, mcpDecl := range p.Manifest.MCPServers {
+			entryName := fmt.Sprintf("plugin:%s:%s", p.ID, serverName)
+			if owner, ok := seenMCP[entryName]; ok {
+				r.recordCollision("mcp", entryName, owner, p.ID, "duplicate MCP server name")
+				continue
+			}
+			seenMCP[entryName] = p.ID
 			r.Register(RegistryEntry{
 				PluginID: p.ID,
 				Type:     "mcp",
-				Name:     fmt.Sprintf("plugin:%s:%s", p.Name, serverName),
+				Name:     entryName,
 				Data:     mcpDecl,
 			})
 		}
 	}
+}
+
+func (r *Registry) recordCollision(typ, name string, winner, loser PluginID, reason string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.collisions = append(r.collisions, RegistryCollision{
+		Type:           typ,
+		Name:           name,
+		WinnerPluginID: winner,
+		LoserPluginID:  loser,
+		Reason:         reason,
+	})
+
+	slog.Warn("Plugin extension collision detected",
+		"type", typ,
+		"name", name,
+		"winner", winner,
+		"loser", loser,
+		"reason", reason,
+	)
 }

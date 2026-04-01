@@ -237,6 +237,8 @@ type UI struct {
 
 	// detailsOpen tracks whether the details panel is open (in compact mode)
 	detailsOpen bool
+	// planPanelOpen tracks whether the plan summary panel is visible.
+	planPanelOpen bool
 
 	// pills state
 	pillsExpanded      bool
@@ -496,6 +498,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
+		active, _, _ := planModeState(m.session.ID)
+		m.planPanelOpen = active
 		m.sessionFiles = msg.files
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.App.Messages.List(context.Background(), m.session.ID)
@@ -1292,6 +1296,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.com.App.Permissions.SetSkipRequests(yolo)
 		m.setEditorPrompt(yolo)
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionTogglePlanMode:
+		if cmd := m.togglePlanMode(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleNotifications:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
@@ -1626,6 +1635,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 			return true
+		case key.Matches(msg, m.keyMap.PlanMode):
+			if cmd := m.togglePlanMode(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
 		case key.Matches(msg, m.keyMap.Chat.Details) && m.isCompact:
 			m.detailsOpen = !m.detailsOpen
 			m.updateLayoutAndSize()
@@ -1756,6 +1770,38 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				value = strings.TrimSpace(value)
 				if value == "exit" || value == "quit" {
 					return m.openQuitDialog()
+				}
+
+				if planCmd, ok := parsePlanCommand(value); ok {
+					m.textarea.Reset()
+					if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					switch planCmd.name {
+					case "enter":
+						if cmd := m.startPlanMode(); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+						if planCmd.args == "" {
+							return tea.Batch(cmds...)
+						}
+						value = planCmd.args
+					case "exit":
+						if cmd := m.exitPlanMode(); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+						return tea.Batch(cmds...)
+					case "approve":
+						if cmd := m.approvePlanMode(); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+						return tea.Batch(cmds...)
+					case "reject":
+						if cmd := m.rejectPlanMode(); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+						return tea.Batch(cmds...)
+					}
 				}
 
 				attachments := m.attachments.List()
@@ -1986,10 +2032,10 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 
 // Draw implements [uv.Drawable] and draws the UI model.
 func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	layout := m.generateLayout(area.Dx(), area.Dy())
+	uiLayout := m.generateLayout(area.Dx(), area.Dy())
 
-	if m.layout != layout {
-		m.layout = layout
+	if m.layout != uiLayout {
+		m.layout = uiLayout
 		m.updateSize()
 	}
 
@@ -1998,47 +2044,47 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	switch m.state {
 	case uiOnboarding:
-		m.drawHeader(scr, layout.header)
+		m.drawHeader(scr, uiLayout.header)
 
 		// NOTE: Onboarding flow will be rendered as dialogs below, but
 		// positioned at the bottom left of the screen.
 
 	case uiInitialize:
-		m.drawHeader(scr, layout.header)
+		m.drawHeader(scr, uiLayout.header)
 
 		main := uv.NewStyledString(m.initializeView())
-		main.Draw(scr, layout.main)
+		main.Draw(scr, uiLayout.main)
 
 	case uiLanding:
-		m.drawHeader(scr, layout.header)
+		m.drawHeader(scr, uiLayout.header)
 		main := uv.NewStyledString(m.landingView())
-		main.Draw(scr, layout.main)
+		main.Draw(scr, uiLayout.main)
 
 		editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
-		editor.Draw(scr, layout.editor)
+		editor.Draw(scr, uiLayout.editor)
 
 	case uiChat:
 		if m.isCompact {
-			m.drawHeader(scr, layout.header)
+			m.drawHeader(scr, uiLayout.header)
 		} else {
-			m.drawSidebar(scr, layout.sidebar)
+			m.drawSidebar(scr, uiLayout.sidebar)
 		}
 
-		m.chat.Draw(scr, layout.main)
-		if layout.pills.Dy() > 0 && m.pillsView != "" {
-			uv.NewStyledString(m.pillsView).Draw(scr, layout.pills)
+		m.chat.Draw(scr, uiLayout.main)
+		if uiLayout.pills.Dy() > 0 && m.pillsView != "" {
+			uv.NewStyledString(m.pillsView).Draw(scr, uiLayout.pills)
 		}
 
 		editorWidth := scr.Bounds().Dx()
 		if !m.isCompact {
-			editorWidth -= layout.sidebar.Dx()
+			editorWidth -= uiLayout.sidebar.Dx()
 		}
 		editor := uv.NewStyledString(m.renderEditorView(editorWidth))
-		editor.Draw(scr, layout.editor)
+		editor.Draw(scr, uiLayout.editor)
 
 		// Draw details overlay in compact mode when open
 		if m.isCompact && m.detailsOpen {
-			m.drawSessionDetails(scr, layout.sessionDetails)
+			m.drawSessionDetails(scr, uiLayout.sessionDetails)
 		}
 	}
 
@@ -2046,7 +2092,17 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Add status and help layer
 	m.status.SetHideHelp(isOnboarding)
-	m.status.Draw(scr, layout.status)
+	if m.shouldShowPlanModeStatusLine() {
+		planRect, helpRect := layout.SplitVertical(uiLayout.status, layout.Fixed(1))
+		m.drawPlanModeStatusLine(scr, planRect)
+		m.status.Draw(scr, helpRect)
+	} else {
+		m.status.Draw(scr, uiLayout.status)
+	}
+
+	if m.planPanelOpen && m.session != nil {
+		m.drawPlanModeDrawer(scr, uiLayout)
+	}
 
 	// Draw completions popup if open
 	if !isOnboarding && m.completionsOpen && m.completions.HasItems() {
@@ -2165,14 +2221,15 @@ func (m *UI) ShortHelp() []key.Binding {
 		}
 
 		if m.focus == uiFocusEditor {
-			tab.SetHelp("tab", "focus chat")
+			tab.SetHelp("tab/shift+tab", "focus chat")
 		} else {
-			tab.SetHelp("tab", "focus editor")
+			tab.SetHelp("tab/shift+tab", "focus editor")
 		}
 
 		binds = append(binds,
 			tab,
 			commands,
+			k.PlanMode,
 			k.Models,
 		)
 
@@ -2199,6 +2256,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		// no session selected
 		binds = append(binds,
 			commands,
+			k.PlanMode,
 			k.Models,
 			k.Editor.Newline,
 		)
@@ -2246,14 +2304,15 @@ func (m *UI) FullHelp() [][]key.Binding {
 		mainBinds := []key.Binding{}
 		tab := k.Tab
 		if m.focus == uiFocusEditor {
-			tab.SetHelp("tab", "focus chat")
+			tab.SetHelp("tab/shift+tab", "focus chat")
 		} else {
-			tab.SetHelp("tab", "focus editor")
+			tab.SetHelp("tab/shift+tab", "focus editor")
 		}
 
 		mainBinds = append(mainBinds,
 			tab,
 			commands,
+			k.PlanMode,
 			k.Models,
 			k.Sessions,
 		)
@@ -2462,6 +2521,9 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 
 	// The help height
 	helpHeight := 1
+	if m.shouldShowPlanModeStatusLine() {
+		helpHeight++
+	}
 	// The editor height: textarea height + margin for attachments and bottom spacing.
 	editorHeight := m.textarea.Height() + editorHeightMargin
 	// The sidebar width
@@ -2904,15 +2966,17 @@ func (m *UI) randomizePlaceholders() {
 
 // renderEditorView renders the editor view with attachments if any.
 func (m *UI) renderEditorView(width int) string {
-	var attachmentsView string
-	if len(m.attachments.List()) > 0 {
-		attachmentsView = m.attachments.Render(width)
+	parts := make([]string, 0, 3)
+	if m.session != nil && !m.planPanelOpen {
+		if banner := planModeBanner(m.com.Styles, m.session.ID, width); banner != "" {
+			parts = append(parts, banner, "")
+		}
 	}
-	return strings.Join([]string{
-		attachmentsView,
-		m.textarea.View(),
-		"", // margin at bottom of editor
-	}, "\n")
+	if len(m.attachments.List()) > 0 {
+		parts = append(parts, m.attachments.Render(width), "")
+	}
+	parts = append(parts, m.textarea.View(), "") // margin at bottom of editor
+	return strings.Join(parts, "\n")
 }
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
@@ -3224,6 +3288,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.chat.Blur()
 	m.chat.ClearMessages()
 	m.pillsExpanded = false
+	m.planPanelOpen = false
 	m.promptQueue = 0
 	m.pillsView = ""
 	m.historyReset()
@@ -3460,6 +3525,9 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 		m.modelInfo(width),
 		"",
 	}
+	if panel := planModePanelView(s, m.session.ID, m.planPanelOpen, width); panel != "" {
+		blocks = append(blocks, panel, "")
+	}
 
 	detailsHeader := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -3490,6 +3558,46 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 				),
 			),
 	).Draw(scr, area)
+}
+
+func (m *UI) shouldShowPlanModeStatusLine() bool {
+	return m.state != uiOnboarding
+}
+
+func (m *UI) drawPlanModeStatusLine(scr uv.Screen, area uv.Rectangle) {
+	sessionID := ""
+	if m.session != nil {
+		sessionID = m.session.ID
+	}
+	line := planModeStatusLine(m.com.Styles, sessionID, m.planModeActive(), area.Dx())
+	if line == "" {
+		return
+	}
+
+	uv.NewStyledString(line).Draw(scr, area)
+}
+
+func (m *UI) drawPlanModeDrawer(scr uv.Screen, layout uiLayout) {
+	if m.session == nil {
+		return
+	}
+
+	t := m.com.Styles
+	contentWidth := min(78, max(42, layout.area.Dx()-8))
+	sessionID := ""
+	if m.session != nil {
+		sessionID = m.session.ID
+	}
+	panel := planModePanelView(t, sessionID, true, contentWidth)
+	if panel == "" {
+		return
+	}
+
+	contentHeight := lipgloss.Height(panel)
+	maxHeight := max(8, layout.area.Dy()-6)
+	contentHeight = min(contentHeight, maxHeight)
+	center := common.CenterRect(layout.area, contentWidth, contentHeight)
+	uv.NewStyledString(panel).Draw(scr, center)
 }
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {

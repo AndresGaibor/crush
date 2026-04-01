@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"charm.land/fantasy"
@@ -14,9 +13,9 @@ import (
 
 // BuildPluginTools convierte las declaraciones de herramientas de plugins
 // en fantasy.AgentTool que se pueden agregar al agente.
-// Recibe las entries del Registry de tipo "tool".
-func BuildPluginTools(entries []RegistryEntry, workingDir string) ([]fantasy.AgentTool, error) {
+func BuildPluginTools(entries []RegistryEntry) ([]fantasy.AgentTool, error) {
 	var tools []fantasy.AgentTool
+	manager := GetManager()
 
 	for _, entry := range entries {
 		if entry.Type != "tool" {
@@ -28,8 +27,19 @@ func BuildPluginTools(entries []RegistryEntry, workingDir string) ([]fantasy.Age
 			continue
 		}
 
-		// Leer el archivo .md de la herramienta
-		toolMD, err := resolveAndReadToolMD(workingDir, entry.PluginID, toolDecl)
+		plugin := (*Plugin)(nil)
+		if manager != nil && manager.Loader != nil {
+			plugin = manager.Loader.GetPlugin(entry.PluginID)
+		}
+		if plugin == nil {
+			slog.Warn("Skipping plugin tool because plugin could not be resolved",
+				"plugin", entry.PluginID,
+				"tool", toolDecl.Name,
+			)
+			continue
+		}
+
+		toolMD, err := resolveAndReadToolMD(plugin.RootDir, toolDecl)
 		if err != nil {
 			slog.Warn("Failed to read plugin tool markdown",
 				"plugin", entry.PluginID,
@@ -39,74 +49,115 @@ func BuildPluginTools(entries []RegistryEntry, workingDir string) ([]fantasy.Age
 			continue
 		}
 
-		// Parsear YAML frontmatter + contenido markdown
 		frontmatter, instructions := splitFrontmatter(toolMD)
-
-		// La descripción del tool es el contenido markdown completo
-		// (frontmatter como metadata, body como instrucciones)
-		description := buildToolDescription(toolDecl, frontmatter, instructions)
-
-		// Crear el schema de input
-		var inputSchema map[string]any
-		if toolDecl.InputSchema != nil {
-			json.Unmarshal(toolDecl.InputSchema, &inputSchema)
-		} else if fmSchema := extractSchemaFromFrontmatter(frontmatter); fmSchema != nil {
-			inputSchema = fmSchema
+		var options map[string]any
+		if manager != nil && manager.Config != nil {
+			options = manager.Config.GetOptions(entry.PluginID)
 		}
 
-		// Crear la herramienta usando fantasy
-		tool := createPluginTool(toolDecl.Name, description, inputSchema, entry.PluginID)
+		description := buildToolDescription(toolDecl, frontmatter, instructions, options)
 
-		tools = append(tools, tool)
+		inputSchema := buildToolInputSchema(toolDecl, frontmatter)
+		tools = append(tools, &pluginTool{
+			name:        toolDecl.Name,
+			description: description,
+			schema:      inputSchema,
+			pluginID:    entry.PluginID,
+			toolPath:    toolSourcePath(plugin.RootDir, toolDecl.Source),
+		})
 	}
 
 	return tools, nil
 }
 
-// createPluginTool crea un fantasy.AgentTool a partir de la declaración del plugin.
-func createPluginTool(name, description string, inputSchema map[string]any, pluginID PluginID) fantasy.AgentTool {
-	// Nombre del tool con prefijo del plugin para evitar colisiones
-	displayName := fmt.Sprintf("plugin_%s_%s", strings.ReplaceAll(string(pluginID), "@", "_"), name)
-
-	return fantasy.NewAgentTool(
-		displayName,
-		description,
-		func(ctx context.Context, params map[string]any, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			// Los plugins markdown son instrucciones para el agente,
-			// no ejecutan código directamente. El agente lee las instrucciones
-			// y las sigue usando las herramientas existentes.
-			inputJSON, _ := json.Marshal(params)
-			return fantasy.NewTextResponse(fmt.Sprintf(
-				"Plugin tool '%s' invoked.\nInput: %s\n\nFollow the tool's instructions to complete this request.",
-				name, string(inputJSON),
-			)), nil
-		},
-	)
+type pluginTool struct {
+	name        string
+	description string
+	schema      map[string]any
+	pluginID    PluginID
+	toolPath    string
+	provider    fantasy.ProviderOptions
 }
 
-// resolveAndReadToolMD busca y lee el archivo markdown de una tool.
-func resolveAndReadToolMD(workingDir string, pluginID PluginID, decl ToolDecl) (string, error) {
-	// El Source es relativo al root del plugin
-	// Buscar el plugin en el directorio de plugins
-	pluginName := strings.Split(string(pluginID), "@")[0]
-
-	searchDirs := []string{
-		filepath.Join(workingDir, ".claude-plugin"),
-		filepath.Join(workingDir, ".claude-plugin", "plugins", pluginName),
-	}
-
-	for _, dir := range searchDirs {
-		path := filepath.Join(dir, decl.Source)
-		if _, err := os.Stat(path); err == nil {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return "", err
-			}
-			return string(data), nil
+func (t *pluginTool) Info() fantasy.ToolInfo {
+	required := schemaRequiredFields(t.schema)
+	parameters := t.schema
+	if parameters == nil {
+		parameters = map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
 		}
 	}
 
-	return "", fmt.Errorf("tool source file not found: %s", decl.Source)
+	return fantasy.ToolInfo{
+		Name:        t.name,
+		Description: t.description,
+		Parameters:  parameters,
+		Required:    required,
+		Parallel:    false,
+	}
+}
+
+func (t *pluginTool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	inputJSON := strings.TrimSpace(params.Input)
+	if inputJSON == "" {
+		inputJSON = "{}"
+	}
+
+	return fantasy.NewTextResponse(fmt.Sprintf(
+		"Plugin tool %q is a Markdown-defined instruction tool.\nPlugin: %s\nSource: %s\nInput: %s\n\nFollow the tool instructions in the plugin manifest to complete the request.",
+		t.name, t.pluginID, t.toolPath, inputJSON,
+	)), nil
+}
+
+func (t *pluginTool) ProviderOptions() fantasy.ProviderOptions {
+	return t.provider
+}
+
+func (t *pluginTool) SetProviderOptions(opts fantasy.ProviderOptions) {
+	t.provider = opts
+}
+
+// resolveAndReadToolMD busca y lee el archivo markdown de una tool.
+func resolveAndReadToolMD(rootDir string, decl ToolDecl) (string, error) {
+	path, err := toolSourcePathResolved(rootDir, decl.Source)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func toolSourcePath(rootDir, source string) string {
+	path, err := toolSourcePathResolved(rootDir, source)
+	if err != nil {
+		return ""
+	}
+	return path
+}
+
+func toolSourcePathResolved(rootDir, source string) (string, error) {
+	if rootDir == "" {
+		return "", fmt.Errorf("plugin root directory is empty")
+	}
+
+	resolved, err := ResolvePath(rootDir, source)
+	if err != nil {
+		return "", err
+	}
+
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("tool source %q points to a directory", source)
+	}
+	return resolved, nil
 }
 
 // splitFrontmatter separa el YAML frontmatter del contenido markdown.
@@ -128,7 +179,7 @@ func splitFrontmatter(content string) (frontmatter map[string]any, body string) 
 		return frontmatter, content
 	}
 
-	// Parsear YAML simple (solo strings y strings arrays por ahora)
+	// Parsear YAML simple (solo strings y strings arrays por ahora).
 	fmText := strings.Join(lines[1:endIdx], "\n")
 	parseSimpleYAML(fmText, frontmatter)
 
@@ -150,7 +201,6 @@ func parseSimpleYAML(text string, m map[string]any) {
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
 		if strings.HasPrefix(value, "[") {
-			// Array simple
 			value = strings.Trim(value, "[]")
 			var items []string
 			for _, item := range strings.Split(value, ",") {
@@ -168,6 +218,23 @@ func parseSimpleYAML(text string, m map[string]any) {
 	}
 }
 
+// buildToolInputSchema construye el schema de entrada del tool.
+func buildToolInputSchema(decl ToolDecl, frontmatter map[string]any) map[string]any {
+	var schema map[string]any
+	if err := json.Unmarshal(decl.InputSchema, &schema); err == nil && len(schema) > 0 {
+		return schema
+	}
+
+	if fmSchema := extractSchemaFromFrontmatter(frontmatter); fmSchema != nil {
+		return fmSchema
+	}
+
+	return map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
+	}
+}
+
 // extractSchemaFromFrontmatter intenta extraer input_schema del frontmatter.
 func extractSchemaFromFrontmatter(fm map[string]any) map[string]any {
 	if schema, ok := fm["input_schema"]; ok {
@@ -178,20 +245,57 @@ func extractSchemaFromFrontmatter(fm map[string]any) map[string]any {
 	return nil
 }
 
+func schemaRequiredFields(schema map[string]any) []string {
+	if schema == nil {
+		return nil
+	}
+	required, ok := schema["required"]
+	if !ok {
+		return nil
+	}
+
+	switch value := required.(type) {
+	case []string:
+		return append([]string(nil), value...)
+	case []any:
+		out := make([]string, 0, len(value))
+		for _, item := range value {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 // buildToolDescription construye la descripción completa de la herramienta.
-func buildToolDescription(decl ToolDecl, frontmatter map[string]any, instructions string) string {
+func buildToolDescription(decl ToolDecl, frontmatter map[string]any, instructions string, options map[string]any) string {
 	var sb strings.Builder
 
-	// Metadata del plugin
+	// Metadata del plugin.
 	sb.WriteString(fmt.Sprintf("# %s\n\n", decl.Name))
 	if decl.Description != "" {
 		sb.WriteString(decl.Description)
 		sb.WriteString("\n\n")
+	} else if fmDescription, ok := frontmatter["description"].(string); ok && fmDescription != "" {
+		sb.WriteString(fmDescription)
+		sb.WriteString("\n\n")
 	}
 
-	// Instrucciones del tool (body del .md)
+	// Instrucciones del tool (body del .md).
 	if instructions != "" {
 		sb.WriteString(instructions)
+		sb.WriteString("\n\n")
+	}
+
+	if len(options) > 0 {
+		sb.WriteString("## Plugin configuration\n\n")
+		if data, err := json.MarshalIndent(options, "", "  "); err == nil {
+			sb.Write(data)
+			sb.WriteString("\n")
+		}
 	}
 
 	return sb.String()

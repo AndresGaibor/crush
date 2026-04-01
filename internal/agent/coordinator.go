@@ -28,8 +28,12 @@ import (
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
 	"github.com/charmbracelet/crush/internal/oauth/copilot"
-	pluginspkg "github.com/charmbracelet/crush/internal/personal/plugins"
 	"github.com/charmbracelet/crush/internal/permission"
+	personalcron "github.com/charmbracelet/crush/internal/personal/cron"
+	"github.com/charmbracelet/crush/internal/personal/planmode"
+	pluginspkg "github.com/charmbracelet/crush/internal/personal/plugins"
+	"github.com/charmbracelet/crush/internal/personal/tasks"
+	personaltools "github.com/charmbracelet/crush/internal/personal/tools"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"golang.org/x/sync/errgroup"
@@ -437,6 +441,13 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		}
 		allTools = append(allTools, agenticFetchTool)
 	}
+	if slices.Contains(agent.AllowedTools, DelegateToAgentToolName) {
+		delegateTool, err := c.delegateToAgentTool(ctx, agent)
+		if err != nil {
+			return nil, err
+		}
+		allTools = append(allTools, delegateTool)
+	}
 
 	// Get the model name for the agent
 	modelName := ""
@@ -462,7 +473,16 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 		tools.NewTodosTool(c.sessions),
 		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		c.sendMessageTool(),
+		personaltools.BuildConfigTool(c.cfg),
+		personaltools.BuildAskUserTool(nil),
 	)
+
+	allTools = append(allTools, planmode.BuildTools()...)
+	allTools = append(allTools, tasks.BuildTools()...)
+	if personalcron.IsInitialized() {
+		allTools = append(allTools, personalcron.BuildTools()...)
+	}
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
@@ -510,10 +530,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 
 	// Plugin tools
 	if pluginspkg.IsInitialized() {
-		pluginTools, err := pluginspkg.BuildPluginTools(
-			pluginspkg.GetManager().Registry.GetTools(),
-			c.cfg.WorkingDir(),
-		)
+		pluginTools, err := pluginspkg.BuildPluginTools(pluginspkg.GetManager().Registry.GetTools())
 		if err != nil {
 			slog.Warn("Failed to build plugin tools", "error", err)
 		} else {
@@ -524,6 +541,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent) ([]fan
 			}
 		}
 	}
+
+	if slices.Contains(agent.AllowedTools, "tool_search") {
+		searchTools := append([]fantasy.AgentTool(nil), filteredTools...)
+		filteredTools = append(filteredTools, personaltools.BuildToolSearchTool(searchTools))
+	}
+
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})

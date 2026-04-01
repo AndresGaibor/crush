@@ -417,6 +417,14 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	// Project specific skills dirs.
 	c.Options.SkillsPaths = append(c.Options.SkillsPaths, ProjectSkillsDir(workingDir)...)
 
+	// Add the default subagent directories if they are not already present.
+	for _, dir := range GlobalSubagentDirs() {
+		if !slices.Contains(c.Options.SubagentsPaths, dir) {
+			c.Options.SubagentsPaths = append(c.Options.SubagentsPaths, dir)
+		}
+	}
+	c.Options.SubagentsPaths = append(c.Options.SubagentsPaths, ProjectSubagentDirs(workingDir)...)
+
 	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
 	}
@@ -834,6 +842,38 @@ func ProjectSkillsDir(workingDir string) []string {
 		filepath.Join(workingDir, ".crush/skills"),
 		filepath.Join(workingDir, ".claude/skills"),
 		filepath.Join(workingDir, ".cursor/skills"),
+	}
+}
+
+// GlobalSubagentDirs returns the default directories for subagent definitions.
+// The Claude Code locations are preferred, with Crush legacy directories kept
+// as fallback compatibility paths.
+func GlobalSubagentDirs() []string {
+	if crushSubagents := os.Getenv("CRUSH_SUBAGENTS_DIR"); crushSubagents != "" {
+		return []string{crushSubagents}
+	}
+
+	configHome := cmp.Or(
+		os.Getenv("XDG_CONFIG_HOME"),
+		filepath.Join(home.Dir(), ".config"),
+	)
+
+	return []string{
+		filepath.Join(configHome, appName, "subagents"),
+		filepath.Join(configHome, "agents", "subagents"),
+		filepath.Join(home.Dir(), ".claude", "agents"),
+	}
+}
+
+// ProjectSubagentDirs returns the default project directories for subagent
+// definitions. Claude Code locations are preferred, with legacy Crush
+// directories preserved as fallback compatibility paths.
+func ProjectSubagentDirs(workingDir string) []string {
+	return []string{
+		filepath.Join(workingDir, ".agents/subagents"),
+		filepath.Join(workingDir, ".crush/subagents"),
+		filepath.Join(workingDir, ".claude/subagents"),
+		filepath.Join(workingDir, ".claude/agents"),
 	}
 }
 

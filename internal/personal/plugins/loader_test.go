@@ -102,6 +102,31 @@ func TestLoader_DisabledPlugin(t *testing.T) {
 	assert.Equal(t, StatusDisabled, plugins[0].Status)
 }
 
+func TestLoader_VersionAllowlistRange(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	pDir := filepath.Join(tmpDir, "versioned-plugin")
+	require.NoError(t, os.MkdirAll(pDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(pDir, "plugin.json"),
+		[]byte(`{"name": "versioned-plugin", "version": "1.4.2", "description": "Test"}`),
+		0o644,
+	))
+
+	config := &PluginConfig{
+		EnabledPlugins: map[PluginID]PluginEnable{
+			"versioned-plugin@project": []string{">=1.2.0 <2.0.0"},
+		},
+	}
+
+	loader := NewLoader(tmpDir, config)
+	plugins, err := loader.LoadAll()
+	require.NoError(t, err)
+	require.Len(t, plugins, 1)
+	assert.Equal(t, StatusEnabled, plugins[0].Status)
+}
+
 func TestLoader_InvalidManifest(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
@@ -120,4 +145,33 @@ func TestLoader_InvalidManifest(t *testing.T) {
 	require.Len(t, plugins, 1)
 	assert.Equal(t, StatusError, plugins[0].Status)
 	assert.Contains(t, plugins[0].Error, "PascalCase")
+}
+
+func TestLoader_ProjectPluginOverridesGlobalByName(t *testing.T) {
+	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, "project")
+	globalPluginDir := filepath.Join(tmpDir, ".config", "crush", "plugins")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(projectDir, "same-plugin"), 0o755))
+	require.NoError(t, os.MkdirAll(globalPluginDir, 0o755))
+	t.Setenv("HOME", tmpDir)
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(projectDir, "same-plugin", "plugin.json"),
+		[]byte(`{"name": "same-plugin", "description": "Project version"}`),
+		0o644,
+	))
+	require.NoError(t, os.MkdirAll(filepath.Join(globalPluginDir, "same-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(globalPluginDir, "same-plugin", "plugin.json"),
+		[]byte(`{"name": "same-plugin", "description": "Global version"}`),
+		0o644,
+	))
+
+	loader := NewLoader(projectDir, &PluginConfig{})
+	plugins, err := loader.LoadAll()
+	require.NoError(t, err)
+	require.Len(t, plugins, 1)
+	assert.Equal(t, "Project version", plugins[0].Description)
+	assert.Equal(t, ScopeProject, plugins[0].Scope)
 }

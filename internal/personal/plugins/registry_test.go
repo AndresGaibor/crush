@@ -84,7 +84,7 @@ func TestRegistry_SkipDisabledPlugins(t *testing.T) {
 
 	registry.PopulateFromPlugins(plugins)
 	assert.Len(t, registry.GetTools(), 1)
-	assert.Equal(t, "T1", registry.GetTools()[0].Name)
+	assert.Equal(t, "enabled@project:T1", registry.GetTools()[0].Name)
 }
 
 func TestRegistry_String(t *testing.T) {
@@ -97,4 +97,35 @@ func TestRegistry_String(t *testing.T) {
 	s := registry.String()
 	assert.Contains(t, s, "hook:1")
 	assert.Contains(t, s, "tool:2")
+}
+
+func TestRegistry_PopulateFromPlugins_DetectsToolCollision(t *testing.T) {
+	t.Parallel()
+	registry := NewRegistry()
+
+	plugins := []*Plugin{
+		{
+			ID:     "first@project",
+			Name:   "first",
+			Status: StatusEnabled,
+			Manifest: &Manifest{
+				Tools: []ToolDecl{{Name: "SharedTool", Source: "./t1.md"}},
+			},
+		},
+		{
+			ID:     "second@project",
+			Name:   "second",
+			Status: StatusEnabled,
+			Manifest: &Manifest{
+				Tools: []ToolDecl{{Name: "SharedTool", Source: "./t2.md"}},
+			},
+		},
+	}
+
+	registry.PopulateFromPlugins(plugins)
+	assert.Len(t, registry.GetTools(), 1)
+	assert.Len(t, registry.Collisions(), 1)
+	assert.Equal(t, "tool", registry.Collisions()[0].Type)
+	assert.Equal(t, PluginID("first@project"), registry.Collisions()[0].WinnerPluginID)
+	assert.Equal(t, PluginID("second@project"), registry.Collisions()[0].LoserPluginID)
 }

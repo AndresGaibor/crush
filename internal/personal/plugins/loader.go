@@ -13,12 +13,12 @@ import (
 
 // Loader descubre y carga plugins desde directorios del filesystem.
 type Loader struct {
-	projectDir  string
-	globalDir   string
-	config      *PluginConfig
-	mu          sync.RWMutex
-	plugins     map[PluginID]*Plugin
-	loadErrors  map[PluginID]error
+	projectDir string
+	globalDir  string
+	config     *PluginConfig
+	mu         sync.RWMutex
+	plugins    map[PluginID]*Plugin
+	loadErrors map[PluginID]error
 }
 
 // NewLoader crea un nuevo Loader de plugins.
@@ -55,15 +55,15 @@ func (l *Loader) LoadAll() ([]*Plugin, error) {
 	// 3. Plugins desde config (rutas explícitas)
 	configPlugins := l.discoverFromConfig()
 
-	// Merge: proyecto > config > global (proyecto tiene prioridad)
+	// Merge: proyecto > config > global (proyecto tiene prioridad).
 	seen := make(map[string]bool)
-	for _, p := range append(append(globalPlugins, configPlugins...), projectPlugins...) {
+	for _, p := range append(append(projectPlugins, configPlugins...), globalPlugins...) {
 		if seen[p.Name] {
 			continue // Ya cargado desde una fuente de mayor prioridad
 		}
 		seen[p.Name] = true
 
-		if !l.config.IsEnabled(p.ID) {
+		if !l.config.IsEnabledForVersion(p.ID, p.Version) {
 			p.Status = StatusDisabled
 			slog.Debug("Plugin disabled by config", "id", p.ID)
 		} else {
@@ -129,7 +129,8 @@ func (l *Loader) discoverPlugins(baseDir string, scope PluginScope) ([]*Plugin, 
 		}
 
 		var quick struct {
-			Name string `json:"name"`
+			Name    string `json:"name"`
+			Version string `json:"version"`
 		}
 		if err := json.Unmarshal(data, &quick); err != nil || quick.Name == "" {
 			continue
@@ -139,6 +140,7 @@ func (l *Loader) discoverPlugins(baseDir string, scope PluginScope) ([]*Plugin, 
 		plugin := &Plugin{
 			ID:      pluginID,
 			Name:    quick.Name,
+			Version: quick.Version,
 			Scope:   scope,
 			RootDir: pluginDir,
 			Status:  StatusLoaded,

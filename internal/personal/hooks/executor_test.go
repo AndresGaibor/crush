@@ -82,7 +82,7 @@ func TestShellExecutor_Timeout(t *testing.T) {
 	}, HookEvent{Type: PreToolUse})
 
 	require.NoError(t, err)
-	assert.NotEqual(t, 0, result.ExitCode) // Should be non-zero (e.g., -1, 124, or similar)
+	assert.NotEqual(t, 0, result.ExitCode)           // Should be non-zero (e.g., -1, 124, or similar)
 	assert.Less(t, time.Since(start), 2*time.Second) // Should not last 10s
 }
 

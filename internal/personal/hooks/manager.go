@@ -11,11 +11,11 @@ import (
 // Se encarga de registrar hooks, hacer matching de eventos,
 // ejecutar hooks y recolectar resultados.
 type Manager struct {
-	config    HookConfigMap
-	executor  *ShellExecutor
-	cwd       string
-	mu        sync.RWMutex
-	onceRun   map[string]bool // Para hooks con Once=true
+	config   HookConfigMap
+	executor *ShellExecutor
+	cwd      string
+	mu       sync.RWMutex
+	onceRun  map[string]bool // Para hooks con Once=true
 }
 
 // NewManager crea un nuevo HookManager.
@@ -23,7 +23,7 @@ func NewManager(cwd string, config HookConfigMap) *Manager {
 	env := []string{} // Se puede pasar el entorno actual si es necesario
 	// Nota: en la integración final, pasa os.Environ() o filtra las vars necesarias.
 	return &Manager{
-		config:   config,
+		config:   cloneHookConfigMap(config),
 		executor: NewShellExecutor(cwd, env),
 		cwd:      cwd,
 		onceRun:  make(map[string]bool),
@@ -35,9 +35,16 @@ func NewManager(cwd string, config HookConfigMap) *Manager {
 func (m *Manager) LoadConfig(config HookConfigMap) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.config = config
+	m.config = cloneHookConfigMap(config)
 	m.onceRun = make(map[string]bool) // Reset once counters
 	slog.Info("Hooks config reloaded")
+}
+
+// Config devuelve una copia de la configuración actual de hooks.
+func (m *Manager) Config() HookConfigMap {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return cloneHookConfigMap(m.config)
 }
 
 // Fire dispara todos los hooks registrados para un evento dado.
@@ -310,4 +317,22 @@ func joinNonEmpty(sep string, parts ...string) string {
 		}
 		return result
 	}
+}
+
+func cloneHookConfigMap(config HookConfigMap) HookConfigMap {
+	if len(config) == 0 {
+		return nil
+	}
+
+	cloned := make(HookConfigMap, len(config))
+	for event, hooks := range config {
+		if len(hooks) == 0 {
+			cloned[event] = nil
+			continue
+		}
+
+		cloned[event] = append([]HookConfig(nil), hooks...)
+	}
+
+	return cloned
 }

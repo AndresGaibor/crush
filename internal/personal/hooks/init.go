@@ -62,4 +62,3 @@ func Reset() {
 	initialized = false
 	instance = nil
 }
-

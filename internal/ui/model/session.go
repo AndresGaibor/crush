@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/crush/internal/diff"
 	"github.com/charmbracelet/crush/internal/fsext"
 	"github.com/charmbracelet/crush/internal/history"
+	"github.com/charmbracelet/crush/internal/personal/planmode"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -66,6 +67,8 @@ type SessionFile struct {
 // returns a sessionFilesLoadedMsg containing the processed session files.
 func (m *UI) loadSession(sessionID string) tea.Cmd {
 	return func() tea.Msg {
+		planmode.GetStateManager(sessionID)
+
 		session, err := m.com.App.Sessions.Get(context.Background(), sessionID)
 		if err != nil {
 			return util.ReportError(err)

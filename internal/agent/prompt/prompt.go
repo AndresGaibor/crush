@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/home"
+	personalSubagents "github.com/charmbracelet/crush/internal/personal/subagents"
 	"github.com/charmbracelet/crush/internal/shell"
 	"github.com/charmbracelet/crush/internal/skills"
 )
@@ -24,19 +25,21 @@ type Prompt struct {
 	now        func() time.Time
 	platform   string
 	workingDir string
+	subagent   bool
 }
 
 type PromptDat struct {
-	Provider      string
-	Model         string
-	Config        config.Config
-	WorkingDir    string
-	IsGitRepo     bool
-	Platform      string
-	Date          string
-	GitStatus     string
-	ContextFiles  []ContextFile
-	AvailSkillXML string
+	Provider         string
+	Model            string
+	Config           config.Config
+	WorkingDir       string
+	IsGitRepo        bool
+	Platform         string
+	Date             string
+	GitStatus        string
+	ContextFiles     []ContextFile
+	AvailSkillXML    string
+	AvailSubagentXML string
 }
 
 type ContextFile struct {
@@ -83,6 +86,13 @@ func WithPlatform(platform string) Option {
 func WithWorkingDir(workingDir string) Option {
 	return func(p *Prompt) {
 		p.workingDir = workingDir
+	}
+}
+
+// WithSubagentMode evita inyectar habilidades y subagentes disponibles en el prompt.
+func WithSubagentMode() Option {
+	return func(p *Prompt) {
+		p.subagent = true
 	}
 }
 
@@ -192,7 +202,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 
 	// Discover and load skills metadata.
 	var availSkillXML string
-	if len(cfg.Options.SkillsPaths) > 0 {
+	if !p.subagent && len(cfg.Options.SkillsPaths) > 0 {
 		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
 		for _, pth := range cfg.Options.SkillsPaths {
 			expandedPaths = append(expandedPaths, expandPath(pth, store))
@@ -202,16 +212,35 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		}
 	}
 
+	// Discover and load subagent metadata.
+	var availSubagentXML string
+	if !p.subagent && len(cfg.Options.SubagentsPaths) > 0 {
+		var discoveredSubagents []*personalSubagents.Subagent
+		if personalSubagents.IsInitialized() {
+			discoveredSubagents = personalSubagents.List()
+		} else {
+			expandedPaths := make([]string, 0, len(cfg.Options.SubagentsPaths))
+			for _, pth := range cfg.Options.SubagentsPaths {
+				expandedPaths = append(expandedPaths, expandPath(pth, store))
+			}
+			discoveredSubagents = personalSubagents.Discover(expandedPaths)
+		}
+		if len(discoveredSubagents) > 0 {
+			availSubagentXML = personalSubagents.ToPromptXML(discoveredSubagents)
+		}
+	}
+
 	isGit := isGitRepo(store.WorkingDir())
 	data := PromptDat{
-		Provider:      provider,
-		Model:         model,
-		Config:        *cfg,
-		WorkingDir:    filepath.ToSlash(workingDir),
-		IsGitRepo:     isGit,
-		Platform:      platform,
-		Date:          p.now().Format("1/2/2006"),
-		AvailSkillXML: availSkillXML,
+		Provider:         provider,
+		Model:            model,
+		Config:           *cfg,
+		WorkingDir:       filepath.ToSlash(workingDir),
+		IsGitRepo:        isGit,
+		Platform:         platform,
+		Date:             p.now().Format("1/2/2006"),
+		AvailSkillXML:    availSkillXML,
+		AvailSubagentXML: availSubagentXML,
 	}
 	if isGit {
 		var err error

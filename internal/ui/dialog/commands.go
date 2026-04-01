@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/commands"
 	"github.com/charmbracelet/crush/internal/config"
+	"github.com/charmbracelet/crush/internal/personal/planmode"
 	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/ui/list"
 	"github.com/charmbracelet/crush/internal/ui/styles"
@@ -126,7 +127,7 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 		key.WithHelp("tab", "switch selection"),
 	)
 	c.keyMap.ShiftTab = key.NewBinding(
-		key.WithKeys("shift+tab"),
+		key.WithKeys("shift+tab", "backtab"),
 		key.WithHelp("shift+tab", "switch selection prev"),
 	)
 	closeKey := CloseKey
@@ -296,7 +297,10 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
-	rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
+	rc.TitleInfo = strings.TrimSpace(strings.Join([]string{
+		commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0),
+		planModeTitleInfo(t, c.sessionID, c.hasSession),
+	}, " "))
 	inputView := t.Dialog.InputPrompt.Render(c.input.View())
 	rc.AddPart(inputView)
 	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
@@ -510,8 +514,15 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	}
 	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_notifications", notificationLabel, "", ActionToggleNotifications{}))
 
+	planLabel := "Enter Plan Mode"
+	planShortcut := "/plan"
+	if sm := planmode.PeekStateManager(c.sessionID); sm != nil && sm.IsActive() {
+		planLabel = "Exit Plan Mode"
+	}
+
 	commands = append(commands,
 		NewCommandItem(c.com.Styles, "toggle_yolo", "Toggle Yolo Mode", "", ActionToggleYoloMode{}),
+		NewCommandItem(c.com.Styles, "toggle_plan_mode", planLabel, planShortcut, ActionTogglePlanMode{}),
 		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 	)
@@ -558,4 +569,29 @@ func (a *Commands) StartLoading() tea.Cmd {
 // StopLoading implements [LoadingDialog].
 func (a *Commands) StopLoading() {
 	a.loading = false
+}
+
+func planModeTitleInfo(t *styles.Styles, sessionID string, hasSession bool) string {
+	if !hasSession {
+		return ""
+	}
+
+	sm := planmode.PeekStateManager(sessionID)
+	if sm == nil {
+		return ""
+	}
+
+	active, approved, hasPlan := sm.IsActive(), sm.IsApproved(), sm.GetPlan() != nil
+	switch {
+	case active && approved:
+		return t.TagBase.Foreground(t.FgBase).Background(t.GreenDark).Render("PLAN MODE · APPROVED")
+	case active && hasPlan:
+		return t.TagInfo.Render("PLAN MODE · REVIEW")
+	case active:
+		return t.TagInfo.Render("PLAN MODE · DRAFT")
+	case hasPlan:
+		return t.TagBase.Foreground(t.FgBase).Background(t.Yellow).Render("PLAN MODE · SAVED")
+	default:
+		return ""
+	}
 }

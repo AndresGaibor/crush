@@ -1,6 +1,7 @@
 package log
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,12 +10,18 @@ import (
 
 func TestHTTPRoundTripLogger(t *testing.T) {
 	// Create a test server that returns a 500 error
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("Skipping test because IPv4 listener could not be created: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Custom-Header", "test-value")
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(`{"error": "Internal server error", "code": 500}`))
 	}))
+	server.Listener = ln
+	server.Start()
 	defer server.Close()
 
 	// Create HTTP client with logging
