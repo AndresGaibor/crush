@@ -9,6 +9,12 @@ Gemini, Bedrock, Copilot, Hyper, MiniMax, Vercel, and more), integrates with
 LSPs for code intelligence, and supports extensibility via MCP servers and
 agent skills.
 
+This is a fork maintained at [github.com/AndresGaibor/crush](https://github.com/AndresGaibor/crush) with additional personal features including:
+- **Compact Memory System**: Intelligent context management
+- **Hooks System**: Automated actions based on patterns
+- **Plugins System**: Extensible architecture for custom features
+- **Enhanced Memory**: Persistent memory with aging and auto-generation
+
 The module path is `github.com/charmbracelet/crush`.
 
 ## Architecture
